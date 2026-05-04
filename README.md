@@ -5,23 +5,21 @@ Multi-camera synchronized recording system for Raspberry Pi.
 ## Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              SyncDrive System                                │
-│                                                                              │
-│   Pi Zero 2 W (x3)              Pi 4                     iOS App            │
-│   ┌─────────────┐            ┌─────────────┐          ┌─────────────┐       │
-│   │   Camera    │  HTTP PUT  │ Controller  │    WS    │   Discar    │       │
-│   │   Node      │───────────▶│             │◀────────▶│             │       │
-│   │             │  segments  │             │  status  │             │       │
-│   └─────────────┘            └─────────────┘          └─────────────┘       │
-│         │                           │                        │              │
-│         │                           ▼                        │              │
-│         │                    ┌─────────────┐                 │              │
-│         │                    │ External    │                 │              │
-│         └───────────────────▶│ HDD         │◀────────────────┘              │
-│              upload          │ (ext4+exFAT)│     sync phone/watch           │
-│                              └─────────────┘                                │
-└─────────────────────────────────────────────────────────────────────────────┘
+                              SyncDrive System
+
+   Pi Zero 2 W (x3)              Pi 4                     iOS App
+   +--------------+            +--------------+          +--------------+
+   |   Camera     |  HTTP PUT  |  Controller  |    WS    |    Discar    |
+   |   Node       |----------->|              |<-------->|              |
+   |              |  segments  |              |  status  |              |
+   +--------------+            +--------------+          +--------------+
+         |                           |                        |
+         |                           v                        |
+         |                    +--------------+                |
+         |                    | External     |                |
+         +----upload--------->| HDD          |<---sync--------+
+                              | (ext4+exFAT) |   phone/watch
+                              +--------------+
 ```
 
 ## Repository Structure
@@ -52,9 +50,62 @@ syncdrive/
 └── grafana-dashboard.json
 ```
 
+## Hardware
+
+- **Controller**: Raspberry Pi 4 (4GB+) with external USB HDD
+- **Cameras**: Raspberry Pi Zero 2 W with Camera Module 3
+- **Storage**: External HDD with two partitions (ext4 + exFAT)
+- **Network**: Local WiFi (5GHz recommended)
+- **SD Cards**: 8GB+ (image is ~6.7GB, /data auto-expands)
+
+## Flashing Camera SD Cards
+
+### Prerequisites
+
+A pre-built worker image (`worker-template.img.gz`) containing:
+- Raspberry Pi OS Lite 32-bit (Debian Trixie)
+- Partition layout: `/boot/firmware` (512MB) + `/` (6GB) + `/data` (auto-expand)
+- WiFi credentials, SSH key, timezone pre-configured
+- Auto-expand service for /data partition on first boot
+
+### Flash a New Card
+
+```bash
+# 1. Insert blank SD card and confirm device
+lsblk
+
+# 2. Flash the image (adjust /dev/sdX to your device)
+gunzip -c ~/worker-template.img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+sudo sync
+
+# 3. Set unique hostname (required - avoids mDNS conflicts)
+sudo ~/prep-worker-card.sh /dev/sdX melb-02-cam-03
+
+# 4. Eject and boot
+sudo eject /dev/sdX
+```
+
+**Time:** ~10 minutes per card including dd.
+
+### First Boot Sequence
+
+1. Cloud-init applies hostname, creates user, configures WiFi
+2. `expand-data-partition.service` grows /data to fill card
+3. System reboots once to apply hostname
+4. Ready at `<hostname>.local` for SSH (~2-3 minutes total)
+
+### After First Boot
+
+Deploy SyncDrive software via Ansible:
+
+```bash
+cd syncdrive/ansible
+ansible-playbook site.yml --limit melb-02-cam-03
+```
+
 ## Quick Start
 
-### Deploy with Ansible (recommended)
+### Deploy with Ansible
 
 ```bash
 # Clone repo
@@ -64,42 +115,87 @@ cd syncdrive/ansible
 # Edit inventory with your Pi hostnames
 nano inventory.ini
 
-# Deploy everything
+# Deploy to all Pis
 ansible-playbook site.yml
+
+# Or deploy to specific host
+ansible-playbook site.yml --limit melb-02-cam-01
 ```
 
-### Update Remotely
-
-After pushing changes to GitHub:
+### Manual Deployment (alternative)
 
 ```bash
-# Via Ansible (updates all Pis)
-ansible-playbook site.yml
+# On your machine - sync code to Pi
+rsync -avz --exclude '.git' --exclude 'venv' ./ pi@melb-02-cam-01.local:~/syncdrive/
 
-# Or manually on one Pi
-ssh pi@melb-02-cam-01
-cd ~/syncdrive && git pull
-sudo systemctl restart syncdrive-recorder syncdrive-uploader syncdrive-cam-api
+# On the Pi - set up venv and services
+ssh pi@melb-02-cam-01.local
+cd ~/syncdrive/cam
+python3 -m venv --system-site-packages venv
+./venv/bin/pip install -r requirements.txt
+sudo cp systemd/*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now syncdrive-recorder syncdrive-uploader syncdrive-cam-api
 ```
 
 ## Components
 
-| Directory | Device | Services |
-|-----------|--------|----------|
-| `cam/` | Pi Zero 2 W | recorder, uploader, api |
-| `ctlr/` | Pi 4 | syncdrive-ctlr |
+| Directory | Device | Services | Port |
+|-----------|--------|----------|------|
+| `cam/` | Pi Zero 2 W | recorder, uploader, api | 8080 |
+| `ctlr/` | Pi 4 | syncdrive-ctlr | 8000 |
 
-See individual READMEs for details:
+See individual READMEs:
 - [Camera Node](cam/README.md)
 - [Controller Node](ctlr/README.md)
 - [Ansible Deployment](ansible/README.md)
 
-## Hardware
+## API Summary
 
-- **Controller**: Raspberry Pi 4 (4GB+) with external USB HDD
-- **Cameras**: Raspberry Pi Zero 2 W with Camera Module 3
-- **Storage**: External HDD with two partitions (ext4 + exFAT)
-- **Network**: Local WiFi (5GHz recommended)
+### Controller (port 8000)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/preflight` | GET | Check all cameras + storage ready |
+| `/api/record/start?uuid=` | POST | Start synchronized recording |
+| `/api/record/stop` | POST | Stop recording |
+| `/api/status` | GET | System status |
+| `/api/storage/unmount` | POST | Safe eject HDD (pauses uploads) |
+| `/api/storage/remount` | POST | Mount HDD (resumes uploads) |
+| `/api/shutdown/all` | POST | Safe system shutdown |
+| `/ws/status` | WS | Real-time status updates |
+
+### Camera (port 8080)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/preflight` | GET | Ready to record? |
+| `/status` | GET | Current state |
+| `/record/start` | POST | Start recording |
+| `/record/stop` | POST | Stop recording |
+| `/upload/pause` | POST | Pause uploads |
+| `/upload/resume` | POST | Resume uploads |
+| `/shutdown` | POST | Shutdown node |
+
+## Overlay Filesystem (Power-Loss Protection)
+
+Enable read-only root to protect SD card from corruption:
+
+```bash
+# Enable via raspi-config
+sudo raspi-config
+# → Performance → Overlay FS → Enable
+# → Write-protect boot → Yes
+# Reboot
+
+# The data-remount service keeps /data writable
+```
+
+After enabling:
+- `/` is read-only (protected)
+- `/data` is read-write (recordings persist)
+- Safe to power-pull during recording
 
 ## License
 
