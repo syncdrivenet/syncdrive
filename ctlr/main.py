@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 
     # Start CAN listener
     await init_can_listener(recordings_path=config.storage.recordings_path)
-    log_info("main", "CAN listener started on port 9100")
+    log_info("main", "CAN listener started on port 9101")
 
     log_info("main", f"Controller ready on port {config.api.port}")
 

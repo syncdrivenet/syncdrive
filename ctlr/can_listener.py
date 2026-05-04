@@ -54,7 +54,7 @@ class CANListener:
     - Falls back to mock data when no ESP32 connected
     """
 
-    def __init__(self, port: int = 9100, recordings_path: Path = None):
+    def __init__(self, port: int = 9101, recordings_path: Path = None):
         self.port = port
         self.recordings_path = recordings_path or Path("/mnt/storage/sessions")
         self.state = CANListenerState()
