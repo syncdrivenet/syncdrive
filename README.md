@@ -149,6 +149,7 @@ See individual READMEs:
 - [Camera Node](cam/README.md)
 - [Controller Node](ctlr/README.md)
 - [Ansible Deployment](ansible/README.md)
+- [Network Setup](docs/NETWORK.md) - mDNS, Tailscale, ports
 
 ## API Summary
 
