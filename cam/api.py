@@ -25,7 +25,7 @@ def _check_ntp_sync() -> bool:
     try:
         # Check if NTP is synchronized
         result = subprocess.run(
-            ["timedatectl", "show", "--property=NTPSynchronized", "--value"],
+            ["/usr/bin/timedatectl", "show", "--property=NTPSynchronized", "--value"],
             capture_output=True,
             text=True,
             timeout=2
