@@ -1,7 +1,7 @@
 # SyncDrive Ansible Configuration
 
-# GitHub repo (SSH for private repo)
-syncdrive_repo: git@github.com:syncdrivenet/syncdrive.git
+# GitHub repo
+syncdrive_repo: https://github.com/syncdrivenet/syncdrive.git
 syncdrive_version: main
 syncdrive_path: /home/pi/syncdrive
 
