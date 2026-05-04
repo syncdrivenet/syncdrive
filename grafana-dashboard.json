@@ -1,0 +1,434 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "syncdrive-main",
+    "title": "SyncDrive Overview",
+    "tags": ["syncdrive"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 3,
+    "refresh": "5s",
+    "templating": {
+      "list": [
+        {
+          "name": "node",
+          "type": "query",
+          "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+          "query": "label_values(up{job=\"syncdrive\"}, node_name)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true,
+          "current": {"selected": true, "text": "All", "value": "$__all"}
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Node Status",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+        "collapsed": false
+      },
+      {
+        "id": 2,
+        "title": "CPU by Node",
+        "type": "gauge",
+        "gridPos": {"h": 5, "w": 6, "x": 0, "y": 1},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 60},
+                {"color": "red", "value": 85}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true,
+          "orientation": "auto",
+          "textMode": "value_and_name"
+        },
+        "targets": [
+          {
+            "expr": "100 - (avg by(node_name) (irate(node_cpu_seconds_total{mode=\"idle\", node_name=~\"$node\"}[5m])) * 100)",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Memory by Node",
+        "type": "gauge",
+        "gridPos": {"h": 5, "w": 6, "x": 6, "y": 1},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 90}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true,
+          "orientation": "auto",
+          "textMode": "value_and_name"
+        },
+        "targets": [
+          {
+            "expr": "100 * (1 - (node_memory_MemAvailable_bytes{node_name=~\"$node\"} / node_memory_MemTotal_bytes{node_name=~\"$node\"}))",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Disk by Node",
+        "type": "gauge",
+        "gridPos": {"h": 5, "w": 6, "x": 12, "y": 1},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 90}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true,
+          "orientation": "auto",
+          "textMode": "value_and_name"
+        },
+        "targets": [
+          {
+            "expr": "100 - ((node_filesystem_avail_bytes{mountpoint=\"/\", node_name=~\"$node\"} / node_filesystem_size_bytes{mountpoint=\"/\", node_name=~\"$node\"}) * 100)",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Temperature by Node",
+        "type": "gauge",
+        "gridPos": {"h": 5, "w": 6, "x": 18, "y": 1},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "celsius",
+            "min": 20,
+            "max": 85,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 60},
+                {"color": "red", "value": 75}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true,
+          "orientation": "auto",
+          "textMode": "value_and_name"
+        },
+        "targets": [
+          {
+            "expr": "max by(node_name) (node_hwmon_temp_celsius{node_name=~\"$node\"})",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Node Up/Down",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 6},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "textMode": "value_and_name"
+        },
+        "targets": [
+          {
+            "expr": "up{job=\"syncdrive\", node_name=~\"$node\"}",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Uptime by Node",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 8, "y": 6},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "dtdurations",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [{"color": "blue", "value": null}]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "textMode": "value_and_name"
+        },
+        "targets": [
+          {
+            "expr": "node_time_seconds{node_name=~\"$node\"} - node_boot_time_seconds{node_name=~\"$node\"}",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Network TX",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 16, "y": 6},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Bps",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 5000000},
+                {"color": "red", "value": 10000000}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "center",
+          "textMode": "value_and_name"
+        },
+        "targets": [
+          {
+            "expr": "sum by(node_name) (irate(node_network_transmit_bytes_total{device!~\"lo|docker.*|veth.*|tailscale.*\", node_name=~\"$node\"}[5m]))",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Trends",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 10},
+        "collapsed": false
+      },
+      {
+        "id": 11,
+        "title": "CPU Over Time",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 11},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 20,
+              "showPoints": "never"
+            }
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        },
+        "targets": [
+          {
+            "expr": "100 - (avg by(node_name) (irate(node_cpu_seconds_total{mode=\"idle\", node_name=~\"$node\"}[5m])) * 100)",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Memory Over Time",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 11},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 20,
+              "showPoints": "never"
+            }
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        },
+        "targets": [
+          {
+            "expr": "100 * (1 - (node_memory_MemAvailable_bytes{node_name=~\"$node\"} / node_memory_MemTotal_bytes{node_name=~\"$node\"}))",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "title": "Temperature Over Time",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 17},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "celsius",
+            "min": 20,
+            "max": 85,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "showPoints": "never"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 60},
+                {"color": "red", "value": 75}
+              ]
+            },
+            "color": {"mode": "thresholds"}
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        },
+        "targets": [
+          {
+            "expr": "max by(node_name) (node_hwmon_temp_celsius{node_name=~\"$node\"})",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "title": "Network TX Over Time",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 17},
+        "datasource": {"type": "prometheus", "uid": "ffkz58kec5ibkb"},
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Bps",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 20,
+              "showPoints": "never"
+            }
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        },
+        "targets": [
+          {
+            "expr": "sum by(node_name) (irate(node_network_transmit_bytes_total{device!~\"lo|docker.*|veth.*|tailscale.*\", node_name=~\"$node\"}[5m]))",
+            "legendFormat": "{{node_name}}"
+          }
+        ]
+      },
+      {
+        "id": 20,
+        "title": "Logs",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
+        "collapsed": false
+      },
+      {
+        "id": 21,
+        "title": "API Logs",
+        "type": "logs",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\"} |~ \"(?i)(api|uvicorn|http|PUT|GET|POST|upload|segment|request|response|endpoint)\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "time": {"from": "now-15m", "to": "now"},
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]
+    }
+  },
+  "overwrite": true
+}

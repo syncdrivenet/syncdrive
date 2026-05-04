@@ -1,0 +1,17 @@
+# Camera Node Dependencies
+
+# Web framework
+fastapi>=0.100.0
+uvicorn>=0.23.0
+
+# HTTP client for segment uploads
+httpx>=0.24.0
+
+# System monitoring
+psutil>=5.9.0
+
+# Configuration
+pyyaml>=6.0
+
+# Note: picamera2 is installed via system packages (apt install python3-picamera2)
+# It requires --system-site-packages when creating venv

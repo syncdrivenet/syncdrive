@@ -1,0 +1,26 @@
+node:
+  name: {{ inventory_hostname }}
+
+controller:
+  host: {{ controller_host }}
+  port: {{ controller_port }}
+
+recording:
+  width: {{ recording.width }}
+  height: {{ recording.height }}
+  fps: {{ recording.fps }}
+  bitrate: {{ recording.bitrate }}
+  segment_duration: {{ recording.segment_duration }}
+  recordings_dir: {{ cam_recordings_path }}
+
+sync:
+  chunk_size: {{ sync.chunk_size }}
+  retry_delay: {{ sync.retry_delay }}
+  max_retry_delay: {{ sync.max_retry_delay }}
+
+logging:
+  dir: {{ cam_logs_path }}
+  level: INFO
+
+api:
+  port: 8080

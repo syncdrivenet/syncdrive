@@ -1,0 +1,94 @@
+---
+# SyncDrive Controller Deployment
+# Clones from GitHub and deploys controller service
+
+- name: Install system dependencies
+  become: true
+  apt:
+    name:
+      - python3-fastapi
+      - python3-uvicorn
+      - python3-yaml
+      - python3-psutil
+      - python3-httpx
+      - git
+      - exfat-fuse
+      - exfat-utils
+    state: present
+    update_cache: true
+
+- name: Create data directories
+  become: true
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: pi
+    group: pi
+    mode: '0755'
+  loop:
+    - "{{ ctlr_config_path }}"
+    - "{{ ctlr_logs_path }}"
+    - /data/logs/ios
+    - /mnt/storage
+    - /mnt/export
+
+- name: Clone/update syncdrive repo
+  git:
+    repo: "{{ syncdrive_repo }}"
+    dest: "{{ syncdrive_path }}"
+    version: "{{ syncdrive_version | default('main') }}"
+    force: yes
+  notify: Restart controller service
+
+- name: Deploy controller config
+  template:
+    src: config.yml.j2
+    dest: "{{ ctlr_config_path }}/config.yml"
+    owner: pi
+    group: pi
+    mode: '0644'
+  notify: Restart controller service
+
+- name: Deploy systemd services
+  become: true
+  template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    mode: '0644'
+  loop:
+    - { src: ctlr.service.j2, dest: syncdrive-ctlr.service }
+    - { src: mnt-storage.mount.j2, dest: mnt-storage.mount }
+    - { src: mnt-export.mount.j2, dest: mnt-export.mount }
+  notify: Restart controller service
+
+- name: Setup passwordless sudo for mount commands
+  become: true
+  copy:
+    dest: /etc/sudoers.d/syncdrive
+    content: |
+      # Allow pi user to mount/unmount without password
+      pi ALL=(ALL) NOPASSWD: /bin/mount /mnt/storage
+      pi ALL=(ALL) NOPASSWD: /bin/mount /mnt/export
+      pi ALL=(ALL) NOPASSWD: /bin/umount /mnt/storage
+      pi ALL=(ALL) NOPASSWD: /bin/umount /mnt/export
+      pi ALL=(ALL) NOPASSWD: /bin/sync
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
+- name: Enable mount units
+  become: true
+  systemd:
+    name: "{{ item }}"
+    enabled: true
+    daemon_reload: true
+  loop:
+    - mnt-storage.mount
+    - mnt-export.mount
+
+- name: Enable and start controller service
+  become: true
+  systemd:
+    name: syncdrive-ctlr
+    enabled: true
+    state: started
+    daemon_reload: true

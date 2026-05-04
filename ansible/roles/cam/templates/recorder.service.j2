@@ -1,0 +1,21 @@
+[Unit]
+Description=SyncDrive Camera Recorder
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory={{ syncdrive_path }}/cam
+Environment="PATH={{ cam_venv_path }}/bin"
+Environment="CAM_CONFIG={{ cam_config_path }}/config.yml"
+ExecStart={{ cam_venv_path }}/bin/python recorder.py
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=syncdrive-recorder
+
+[Install]
+WantedBy=multi-user.target

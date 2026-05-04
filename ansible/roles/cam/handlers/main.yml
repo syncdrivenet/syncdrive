@@ -1,0 +1,11 @@
+---
+- name: Restart camera services
+  become: true
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop:
+    - syncdrive-recorder
+    - syncdrive-uploader
+    - syncdrive-cam-api

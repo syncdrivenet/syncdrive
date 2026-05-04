@@ -1,0 +1,87 @@
+---
+# SyncDrive Camera Node Deployment
+# Clones from GitHub and deploys camera services
+
+- name: Install system dependencies
+  become: true
+  apt:
+    name:
+      - python3-picamera2
+      - python3-venv
+      - git
+    state: present
+    update_cache: true
+
+- name: Create data directories
+  become: true
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: pi
+    group: pi
+    mode: '0755'
+  loop:
+    - "{{ cam_config_path }}"
+    - "{{ cam_config_path }}/cmd"
+    - "{{ cam_recordings_path }}"
+    - "{{ cam_logs_path }}"
+
+- name: Clone/update syncdrive repo
+  git:
+    repo: "{{ syncdrive_repo }}"
+    dest: "{{ syncdrive_path }}"
+    version: "{{ syncdrive_version | default('main') }}"
+    force: yes
+  notify: Restart camera services
+
+- name: Create venv with system site-packages
+  command: python3 -m venv --system-site-packages {{ cam_venv_path }}
+  args:
+    creates: "{{ cam_venv_path }}/bin/python"
+
+- name: Install Python dependencies
+  pip:
+    requirements: "{{ syncdrive_path }}/cam/requirements.txt"
+    virtualenv: "{{ cam_venv_path }}"
+    state: present
+
+- name: Deploy camera config
+  template:
+    src: config.yml.j2
+    dest: "{{ cam_config_path }}/config.yml"
+    owner: pi
+    group: pi
+    mode: '0644'
+  notify: Restart camera services
+
+- name: Deploy systemd services
+  become: true
+  template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    mode: '0644'
+  loop:
+    - { src: recorder.service.j2, dest: syncdrive-recorder.service }
+    - { src: uploader.service.j2, dest: syncdrive-uploader.service }
+    - { src: api.service.j2, dest: syncdrive-cam-api.service }
+    - { src: data-remount.service.j2, dest: data-remount.service }
+  notify: Restart camera services
+
+- name: Enable data-remount service (for overlay FS)
+  become: true
+  systemd:
+    name: data-remount
+    enabled: true
+    daemon_reload: true
+
+- name: Enable and start services
+  become: true
+  systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - syncdrive-recorder
+    - syncdrive-uploader
+    - syncdrive-cam-api

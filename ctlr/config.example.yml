@@ -1,0 +1,38 @@
+# Controller Node Configuration
+# Copy to /data/ctlr/config.yml and modify as needed
+
+node:
+  # Node name (defaults to hostname if not set)
+  name: melb-02-ctlr
+
+# Camera nodes
+cameras:
+  - name: melb-02-cam-01
+    host: melb-02-cam-01.local
+    port: 8080
+
+  - name: melb-02-cam-02
+    host: melb-02-cam-02.local
+    port: 8080
+
+  - name: melb-02-cam-03
+    host: melb-02-cam-03.local
+    port: 8080
+
+storage:
+  # Where to store received recordings
+  recordings_dir: /data/recordings
+
+recording:
+  # Segment duration (should match camera config)
+  segment_duration: 120
+
+logging:
+  # Log directory (Fluent Bit tails from here)
+  dir: /data/logs/ctlr
+  level: INFO
+
+api:
+  # API server binding
+  host: 0.0.0.0
+  port: 8000

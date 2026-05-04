@@ -1,0 +1,12 @@
+[Unit]
+Description=SyncDrive Export Partition (exFAT)
+After=local-fs.target
+
+[Mount]
+What=/dev/sda2
+Where=/mnt/export
+Type=exfat
+Options=defaults,noatime,nofail,uid=1000,gid=1000
+
+[Install]
+WantedBy=multi-user.target

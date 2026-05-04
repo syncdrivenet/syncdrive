@@ -1,0 +1,10 @@
+---
+- name: Deploy SyncDrive Camera Nodes
+  hosts: cameras
+  roles:
+    - cam
+
+- name: Deploy SyncDrive Controller
+  hosts: controllers
+  roles:
+    - ctlr

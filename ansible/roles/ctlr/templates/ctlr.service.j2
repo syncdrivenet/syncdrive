@@ -1,0 +1,21 @@
+[Unit]
+Description=SyncDrive Controller
+After=network.target mnt-storage.mount mnt-export.mount
+Wants=mnt-storage.mount mnt-export.mount
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory={{ syncdrive_path }}/ctlr
+Environment="CTLR_CONFIG={{ ctlr_config_path }}/config.yml"
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=syncdrive-ctlr
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=SyncDrive Camera Uploader
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/syncdrive/cam
+Environment="PATH=/home/pi/syncdrive/cam/venv/bin"
+Environment="CAM_CONFIG=/data/cam/config.yml"
+ExecStart=/home/pi/syncdrive/cam/venv/bin/python uploader.py
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=syncdrive-uploader
+
+[Install]
+WantedBy=multi-user.target

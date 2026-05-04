@@ -1,0 +1,12 @@
+[Unit]
+Description=SyncDrive Storage Partition (ext4)
+After=local-fs.target
+
+[Mount]
+What={{ storage_device | default('/dev/sda1') }}
+Where=/mnt/storage
+Type=ext4
+Options=defaults,noatime,nofail
+
+[Install]
+WantedBy=multi-user.target

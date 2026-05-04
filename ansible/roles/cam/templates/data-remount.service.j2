@@ -1,0 +1,12 @@
+[Unit]
+Description=Remount /data directly (bypass overlay)
+After=local-fs.target
+Before=syncdrive-recorder.service syncdrive-uploader.service syncdrive-cam-api.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "umount -l /data 2>/dev/null; umount -l /media/root-ro/data 2>/dev/null; mount -o rw,noatime /dev/mmcblk0p3 /data; chown pi:pi /data"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

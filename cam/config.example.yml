@@ -1,0 +1,43 @@
+# Camera Node Configuration
+# Copy this to /data/cam/config.yml and modify as needed
+
+node:
+  # Node name (defaults to hostname if not set)
+  name: melb-02-cam-01
+
+controller:
+  # Controller hostname/IP
+  host: melb-02-ctlr.local
+  port: 8000
+
+recording:
+  # Video resolution
+  width: 1920
+  height: 1080
+  fps: 30
+
+  # Segment duration in seconds (2 minutes default)
+  segment_duration: 120
+
+  # Where to store recordings (must be writable)
+  recordings_dir: /data/recordings
+
+sync:
+  # Upload chunk size in bytes (256KB)
+  chunk_size: 262144
+
+  # Retry delay in seconds (exponential backoff)
+  retry_delay: 5
+  max_retry_delay: 60
+
+logging:
+  # Log directory (Fluent Bit tails from here)
+  dir: /data/logs/cam
+
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  level: INFO
+
+api:
+  # API server binding
+  host: 0.0.0.0
+  port: 8080

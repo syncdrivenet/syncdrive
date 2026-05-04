@@ -1,0 +1,14 @@
+# Controller Node Dependencies
+
+# Web framework
+fastapi>=0.100.0
+uvicorn>=0.23.0
+
+# HTTP client for camera communication
+httpx>=0.24.0
+
+# Configuration
+pyyaml>=6.0
+
+# System metrics for WebSocket
+psutil>=5.9.0

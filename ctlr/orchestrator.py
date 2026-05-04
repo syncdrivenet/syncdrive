@@ -1,0 +1,329 @@
+"""
+Camera orchestrator for controller.
+Coordinates multi-camera recording sessions.
+"""
+
+import asyncio
+import time
+import uuid as uuid_lib
+from typing import Optional, List, Dict
+
+import httpx
+
+from config import get_config, CameraConfig
+from state import get_state, CameraStatus
+from logger import log_info, log_error, log_warning
+from database import get_db
+
+
+class Orchestrator:
+    """
+    Orchestrates multi-camera recording.
+
+    - Checks camera health/preflight
+    - Sends synchronized start commands
+    - Monitors camera status
+    - Handles stop commands
+    """
+
+    def __init__(self):
+        self.config = get_config()
+        self.state = get_state()
+        self.client: Optional[httpx.AsyncClient] = None
+        self._monitor_task: Optional[asyncio.Task] = None
+        self._running = False
+
+    async def start(self):
+        """Start the orchestrator."""
+        if self._running:
+            return
+
+        self._running = True
+        self.client = httpx.AsyncClient(timeout=10.0)
+
+        # Start camera monitor
+        self._monitor_task = asyncio.create_task(self._monitor_cameras())
+
+        log_info("orchestrator", "Orchestrator started")
+
+    async def stop(self):
+        """Stop the orchestrator."""
+        self._running = False
+
+        if self._monitor_task:
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.client:
+            await self.client.aclose()
+
+        log_info("orchestrator", "Orchestrator stopped")
+
+    async def _monitor_cameras(self):
+        """Background task to monitor camera health."""
+        while self._running:
+            for cam in self.config.cameras:
+                try:
+                    await self._check_camera(cam)
+                except Exception as e:
+                    log_warning("orchestrator", f"Error checking {cam.name}: {e}")
+
+            await asyncio.sleep(10)
+
+    async def _check_camera(self, cam: CameraConfig):
+        """Check single camera health."""
+        try:
+            response = await self.client.get(f"{cam.base_url}/health")
+            if response.status_code == 200:
+                self.state.update_camera(cam.name, CameraStatus.ONLINE)
+            else:
+                self.state.update_camera(cam.name, CameraStatus.ERROR)
+        except httpx.ConnectError:
+            self.state.update_camera(cam.name, CameraStatus.OFFLINE)
+        except Exception as e:
+            self.state.update_camera(cam.name, CameraStatus.ERROR, error=str(e))
+
+    async def preflight_all(self) -> Dict[str, dict]:
+        """Run preflight check on all cameras."""
+        results = {}
+
+        async def check_one(cam: CameraConfig):
+            try:
+                response = await self.client.get(f"{cam.base_url}/preflight")
+                if response.status_code == 200:
+                    data = response.json()
+                    results[cam.name] = data.get("data", {})
+                else:
+                    results[cam.name] = {"ready": False, "error": f"HTTP {response.status_code}"}
+            except Exception as e:
+                results[cam.name] = {"ready": False, "error": str(e)}
+
+        await asyncio.gather(*[check_one(cam) for cam in self.config.cameras])
+
+        return results
+
+    async def start_recording(self, session_uuid: Optional[str] = None, sync_delay_ms: int = 2000) -> dict:
+        """
+        Start synchronized recording on all cameras.
+
+        Args:
+            session_uuid: Optional UUID (generated if not provided)
+            sync_delay_ms: Delay before synchronized start (ms)
+
+        Returns:
+            Result dict with uuid and camera results
+        """
+        if self.state.is_recording:
+            return {"success": False, "error": "Already recording"}
+
+        # Generate UUID if not provided
+        if session_uuid is None:
+            session_uuid = str(uuid_lib.uuid4())
+
+        # Calculate synchronized start time
+        start_at = int(time.time() * 1000) + sync_delay_ms
+
+        log_info("orchestrator", f"Starting recording", uuid=session_uuid, start_at=start_at)
+
+        # Send start command to all cameras
+        results = {}
+
+        async def start_one(cam: CameraConfig):
+            try:
+                response = await self.client.post(
+                    f"{cam.base_url}/record/start",
+                    params={"uuid": session_uuid, "start_at": start_at},
+                )
+                if response.status_code == 200:
+                    results[cam.name] = {"success": True}
+                    self.state.update_camera(cam.name, CameraStatus.RECORDING)
+                else:
+                    results[cam.name] = {"success": False, "error": f"HTTP {response.status_code}"}
+            except Exception as e:
+                results[cam.name] = {"success": False, "error": str(e)}
+
+        await asyncio.gather(*[start_one(cam) for cam in self.config.cameras])
+
+        # Check if any camera started successfully
+        any_success = any(r.get("success") for r in results.values())
+
+        if any_success:
+            self.state.set_recording(session_uuid)
+            # Create session in database
+            db = get_db()
+            db.create_session(session_uuid, cameras_count=len(self.config.cameras))
+            log_info("orchestrator", f"Recording started", uuid=session_uuid)
+        else:
+            log_error("orchestrator", "All cameras failed to start")
+
+        return {
+            "success": any_success,
+            "uuid": session_uuid,
+            "cameras": results,
+        }
+
+    async def stop_recording(self) -> dict:
+        """Stop recording on all cameras."""
+        if not self.state.is_recording:
+            return {"success": False, "error": "Not recording"}
+
+        session_uuid = self.state.session_uuid
+
+        log_info("orchestrator", f"Stopping recording", uuid=session_uuid)
+
+        results = {}
+
+        async def stop_one(cam: CameraConfig):
+            try:
+                response = await self.client.post(f"{cam.base_url}/record/stop")
+                if response.status_code == 200:
+                    data = response.json()
+                    results[cam.name] = data
+                    self.state.update_camera(cam.name, CameraStatus.ONLINE)
+                else:
+                    results[cam.name] = {"success": False, "error": f"HTTP {response.status_code}"}
+            except Exception as e:
+                results[cam.name] = {"success": False, "error": str(e)}
+
+        await asyncio.gather(*[stop_one(cam) for cam in self.config.cameras])
+
+        # Mark session stopped in database
+        db = get_db()
+        db.stop_session(session_uuid)
+
+        self.state.set_idle()
+
+        log_info("orchestrator", f"Recording stopped", uuid=session_uuid)
+
+        return {
+            "success": True,
+            "uuid": session_uuid,
+            "cameras": results,
+        }
+
+    async def get_camera_status(self, camera_name: str) -> Optional[dict]:
+        """Get detailed status from a specific camera."""
+        cam = next((c for c in self.config.cameras if c.name == camera_name), None)
+        if not cam:
+            return None
+
+        try:
+            response = await self.client.get(f"{cam.base_url}/status")
+            if response.status_code == 200:
+                return response.json().get("data")
+        except Exception:
+            pass
+
+        return None
+
+    async def pause_all_uploads(self) -> Dict[str, dict]:
+        """Pause uploads on all cameras (for safe HDD unmount)."""
+        results = {}
+
+        async def pause_one(cam: CameraConfig):
+            try:
+                response = await self.client.post(f"{cam.base_url}/upload/pause")
+                if response.status_code == 200:
+                    results[cam.name] = {"success": True, "paused": True}
+                else:
+                    results[cam.name] = {"success": False, "error": f"HTTP {response.status_code}"}
+            except Exception as e:
+                results[cam.name] = {"success": False, "error": str(e)}
+
+        await asyncio.gather(*[pause_one(cam) for cam in self.config.cameras])
+
+        log_info("orchestrator", "Paused uploads on all cameras")
+        return results
+
+    async def resume_all_uploads(self) -> Dict[str, dict]:
+        """Resume uploads on all cameras (after HDD remount)."""
+        results = {}
+
+        async def resume_one(cam: CameraConfig):
+            try:
+                response = await self.client.post(f"{cam.base_url}/upload/resume")
+                if response.status_code == 200:
+                    results[cam.name] = {"success": True, "paused": False}
+                else:
+                    results[cam.name] = {"success": False, "error": f"HTTP {response.status_code}"}
+            except Exception as e:
+                results[cam.name] = {"success": False, "error": str(e)}
+
+        await asyncio.gather(*[resume_one(cam) for cam in self.config.cameras])
+
+        log_info("orchestrator", "Resumed uploads on all cameras")
+        return results
+
+    async def shutdown_all_cameras(self) -> Dict[str, dict]:
+        """Send shutdown command to all cameras."""
+        results = {}
+
+        async def shutdown_one(cam: CameraConfig):
+            try:
+                response = await self.client.post(f"{cam.base_url}/shutdown", timeout=5.0)
+                if response.status_code == 200:
+                    results[cam.name] = {"success": True, "message": "Shutting down"}
+                else:
+                    results[cam.name] = {"success": False, "error": f"HTTP {response.status_code}"}
+            except Exception as e:
+                # Connection error is expected - camera may shutdown before response
+                results[cam.name] = {"success": True, "message": "Shutdown initiated"}
+
+        await asyncio.gather(*[shutdown_one(cam) for cam in self.config.cameras])
+
+        log_info("orchestrator", "Shutdown command sent to all cameras")
+        return results
+
+    async def wait_cameras_offline(self, timeout: float = 15.0) -> Dict[str, bool]:
+        """Wait for all cameras to go offline (confirm shutdown)."""
+        import time
+        start = time.time()
+        offline_status = {cam.name: False for cam in self.config.cameras}
+
+        while time.time() - start < timeout:
+            all_offline = True
+            for cam in self.config.cameras:
+                if offline_status[cam.name]:
+                    continue
+                try:
+                    response = await self.client.get(f"{cam.base_url}/health", timeout=2.0)
+                    # Still responding - not offline yet
+                    all_offline = False
+                except Exception:
+                    # Connection failed - camera is offline
+                    offline_status[cam.name] = True
+                    log_info("orchestrator", f"Camera offline: {cam.name}")
+
+            if all_offline:
+                break
+            await asyncio.sleep(1)
+
+        return offline_status
+
+
+# Global orchestrator
+_orchestrator: Optional[Orchestrator] = None
+
+
+def get_orchestrator() -> Orchestrator:
+    """Get global orchestrator instance."""
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = Orchestrator()
+    return _orchestrator
+
+
+async def start_orchestrator():
+    """Start the global orchestrator."""
+    orchestrator = get_orchestrator()
+    await orchestrator.start()
+
+
+async def stop_orchestrator():
+    """Stop the global orchestrator."""
+    global _orchestrator
+    if _orchestrator:
+        await _orchestrator.stop()

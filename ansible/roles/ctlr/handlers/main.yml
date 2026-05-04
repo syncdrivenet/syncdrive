@@ -1,0 +1,7 @@
+---
+- name: Restart controller service
+  become: true
+  systemd:
+    name: syncdrive-ctlr
+    state: restarted
+    daemon_reload: true

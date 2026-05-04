@@ -1,0 +1,36 @@
+# SyncDrive Ansible Configuration
+
+# GitHub repo (SSH for private repo)
+syncdrive_repo: git@github.com:syncdrivenet/syncdrive.git
+syncdrive_version: main
+syncdrive_path: /home/pi/syncdrive
+
+# Controller settings
+controller_host: melb-02-ctlr.local
+controller_port: 8000
+
+# Recording settings
+recording:
+  width: 1920
+  height: 1080
+  fps: 30
+  bitrate: 4000000
+  segment_duration: 120  # 2 minutes
+
+# Sync settings
+sync:
+  chunk_size: 65536
+  retry_delay: 2
+  max_retry_delay: 30
+
+# Camera node paths
+cam_venv_path: /home/pi/syncdrive/cam/venv
+cam_config_path: /data/cam
+cam_recordings_path: /data/recordings
+cam_logs_path: /data/logs/cam
+
+# Controller node paths
+ctlr_config_path: /data/ctlr
+ctlr_storage_path: /mnt/storage/sessions
+ctlr_export_path: /mnt/export
+ctlr_logs_path: /data/logs/ctlr
