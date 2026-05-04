@@ -13,6 +13,12 @@ Multi-camera synchronized recording system for Raspberry Pi.
    |   Node       |----------->|              |<-------->|              |
    |              |  segments  |              |  status  |              |
    +--------------+            +--------------+          +--------------+
+         |                           ^                        |
+         |                           | TCP:9101               |
+         |                    +--------------+                |
+         |                    |    ESP32     |                |
+         |                    |   CAN Bus    |                |
+         |                    +--------------+                |
          |                           |                        |
          |                           v                        |
          |                    +--------------+                |
@@ -54,6 +60,7 @@ syncdrive/
 
 - **Controller**: Raspberry Pi 4 (4GB+) with external USB HDD
 - **Cameras**: Raspberry Pi Zero 2 W with Camera Module 3
+- **CAN Logger**: ESP32 with CAN transceiver (MCP2515 or SN65HVD230)
 - **Storage**: External HDD with two partitions (ext4 + exFAT)
 - **Network**: Local WiFi (5GHz recommended)
 - **SD Cards**: 8GB+ (image is ~6.7GB, /data auto-expands)
@@ -144,6 +151,8 @@ sudo systemctl enable --now syncdrive-recorder syncdrive-uploader syncdrive-cam-
 |-----------|--------|----------|------|
 | `cam/` | Pi Zero 2 W | recorder, uploader, api | 8080 |
 | `ctlr/` | Pi 4 | syncdrive-ctlr | 8000 |
+| - | Pi 4 | CAN listener (TCP) | 9101 |
+| - | ESP32 | CAN bus logger | connects to 9101 |
 
 See individual READMEs:
 - [Camera Node](cam/README.md)
@@ -158,12 +167,14 @@ See individual READMEs:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/preflight` | GET | Check all cameras + storage ready |
+| `/api/preflight?client_time_ms=` | GET | Check cameras + storage + CAN ready |
 | `/api/record/start?uuid=` | POST | Start synchronized recording |
 | `/api/record/stop` | POST | Stop recording |
 | `/api/status` | GET | System status |
-| `/api/storage/unmount` | POST | Safe eject HDD (pauses uploads) |
-| `/api/storage/remount` | POST | Mount HDD (resumes uploads) |
+| `/api/can/status` | GET | CAN bus connection status |
+| `/api/storage/unmount` | POST | Safe eject HDD (pauses uploads + CAN) |
+| `/api/storage/remount` | POST | Mount HDD (resumes uploads + CAN) |
+| `/api/export/{uuid}` | POST | Export session to exFAT |
 | `/api/shutdown/all` | POST | Safe system shutdown |
 | `/ws/status` | WS | Real-time status updates |
 

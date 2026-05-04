@@ -15,23 +15,23 @@ Orchestrates synchronized recording, receives video segments, provides real-time
 │  - iOS app interface            - Start/stop all        - Segment storage   │
 │  - Real-time status             - Health monitoring     - Export to exFAT   │
 │                                                                              │
+│  can_listener.py                                                            │
+│  - TCP server (port 9101)                                                   │
+│  - Receives CAN frames from ESP32                                           │
+│  - Logs to /mnt/storage/sessions/{uuid}/can/                                │
+│                                                                              │
 │  /mnt/storage (ext4)  ◀── segments ──  Cameras (Pi Zero 2)                  │
 │  /mnt/export (exFAT)  ──▶ Mac-readable exports                              │
+│                        ◀── CAN data ──  ESP32 (TCP:9101)                    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Not Yet Implemented
+## Services
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **CAN Bus** | Placeholder | `/api/can/status` returns stub data |
-| **External SSD** | Planned | USB SSD storage for sessions |
-
-## Service
-
-| Service | Port | Description |
-|---------|------|-------------|
-| `syncdrive-ctlr` | 8000 | HTTP API + WebSocket |
+| Service | Port | Protocol | Description |
+|---------|------|----------|-------------|
+| `syncdrive-ctlr` | 8000 | HTTP/WS | API + WebSocket |
+| CAN Listener | 9101 | TCP | ESP32 CAN data |
 
 ## Installation
 
@@ -106,9 +106,31 @@ All endpoints use `/api/` prefix (except `/health` and `/ws/status`).
 ### Recording
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/preflight` | GET | Check cameras + storage ready |
+| `/api/preflight?client_time_ms=` | GET | Check cameras + storage + CAN ready |
 | `/api/record/start?uuid=` | POST | Start synchronized recording |
 | `/api/record/stop` | POST | Stop recording |
+
+**Preflight Response:**
+```json
+{
+  "ready": true,
+  "server_time_ms": 1714844321050,
+  "client_time_ms": 1714844321000,
+  "cameras": {
+    "melb-02-cam-01": {"ready": true, "ntp_synced": true, "camera": true, "disk_ok": true}
+  },
+  "storage": {"ready": true, "mounted": true},
+  "can": {"ready": true, "connected": true, "ntp_synced": true}
+}
+```
+
+**Clock Sync Check (iOS):**
+```
+RTT = now - client_time_ms
+Server time now = server_time_ms + (RTT / 2)
+Clock offset = now - server_time_now
+Warn if offset > 2 seconds
+```
 
 ### Segments (from cameras)
 | Endpoint | Method | Description |
@@ -139,10 +161,28 @@ All endpoints use `/api/` prefix (except `/health` and `/ws/status`).
 | `/api/sync/watch/{uuid}/{file}` | PUT | Upload watch data |
 | `/api/log` | POST | Receive iOS logs |
 
-### CAN Bus (Not Implemented)
+### CAN Bus
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/can/status` | GET | CAN bus status (placeholder) |
+| `/api/can/status` | GET | CAN bus connection + NTP status |
+
+**CAN Status Response:**
+```json
+{
+  "connected": true,
+  "ntp_synced": true,
+  "status": "recording"
+}
+```
+
+Status values: `idle` | `recording` | `paused`
+
+**ESP32 Protocol:**
+- TCP connection to port 9101
+- CSV format: `timestamp,can_id,length,hex_data\n`
+- Example: `1714844321234,7E8,8,0102030405060708`
+- Timestamps in milliseconds (Unix epoch)
+- Sends header `ts,id,len,data` on connect
 
 ### System Shutdown
 | Endpoint | Method | Description |
@@ -160,22 +200,30 @@ All endpoints use `/api/` prefix (except `/health` and `/ws/status`).
 ## Storage Layout
 
 ```
-/mnt/storage/sessions/     (ext4 - journaled)
+/mnt/storage/sessions/     (ext4 - journaled, active recording)
 └── {uuid}/
     ├── melb-02-cam-01/
     │   └── seg_*.h264
-    ├── phone/
-    │   └── motion.json
-    └── watch/
-        └── heartrate.json
+    ├── melb-02-cam-02/
+    │   └── seg_*.h264
+    └── can/
+        └── can_log.csv    (CAN bus data)
 
 /mnt/export/               (exFAT - Mac readable)
 └── {uuid}/                (exported sessions)
+    ├── melb-02-cam-01/
+    ├── can/
+    ├── phone/             (uploaded after "Process" in iOS)
+    │   └── motion.csv
+    └── watch/
+        └── heartrate.csv
 
 /data/ctlr/
 ├── config.yml
 └── sessions.db            (SQLite)
 ```
+
+**Note:** Phone/watch data goes directly to export partition (exFAT) since it's only uploaded after pressing "Process" in the iOS app.
 
 ## Logs
 
