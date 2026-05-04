@@ -35,7 +35,7 @@ def _check_ntp_sync() -> bool:
 
         # Check stratum - if > 10, we're synced to a local fallback
         result = subprocess.run(
-            ["chronyc", "tracking"],
+            ["/usr/bin/chronyc", "tracking"],
             capture_output=True,
             text=True,
             timeout=2
@@ -48,7 +48,10 @@ def _check_ntp_sync() -> bool:
                 break
 
         return True
-    except Exception:
+    except Exception as e:
+        # Log error for debugging
+        import sys
+        print(f"NTP check error: {e}", file=sys.stderr)
         return False
 
 app = FastAPI(title="Camera Node API", version="2.0.0")
