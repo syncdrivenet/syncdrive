@@ -5,12 +5,51 @@ Communicates with recorder process via file-based commands.
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 
 from config import get_config
 from logger import log_info
+
+
+def _check_ntp_sync() -> bool:
+    """
+    Check if system clock is properly NTP synchronized.
+
+    Returns False if:
+    - NTP not synchronized
+    - Stratum > 10 (synced to local fallback, not real NTP)
+    """
+    try:
+        # Check if NTP is synchronized
+        result = subprocess.run(
+            ["timedatectl", "show", "--property=NTPSynchronized", "--value"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.stdout.strip().lower() != "yes":
+            return False
+
+        # Check stratum - if > 10, we're synced to a local fallback
+        result = subprocess.run(
+            ["chronyc", "tracking"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("Stratum"):
+                stratum = int(line.split(":")[1].strip())
+                if stratum > 10:
+                    return False  # Synced to local fallback, not real NTP
+                break
+
+        return True
+    except Exception:
+        return False
 
 app = FastAPI(title="Camera Node API", version="2.0.0")
 
@@ -50,6 +89,7 @@ async def preflight():
 
     camera_ok = recorder_state.get("camera_available", False)
     is_idle = not recorder_state.get("recording", False)
+    ntp_synced = _check_ntp_sync()
 
     # Check disk space
     try:
@@ -63,9 +103,10 @@ async def preflight():
     return {
         "success": True,
         "data": {
-            "ready": camera_ok and is_idle and disk_ok,
+            "ready": camera_ok and is_idle and disk_ok and ntp_synced,
             "camera": camera_ok,
             "idle": is_idle,
+            "ntp_synced": ntp_synced,
             "disk_ok": disk_ok,
             "disk_free_gb": round(disk_free_gb, 2),
             "node": config.node.name,
@@ -95,6 +136,7 @@ async def status():
             "segment": recorder_state.get("segment", 0),
             "duration": recorder_state.get("duration", 0),
             "camera_available": recorder_state.get("camera_available", False),
+            "ntp_synced": _check_ntp_sync(),
             "pending_uploads": uploader_state.get("pending", 0),
             "uploading": uploader_state.get("uploading"),
             "disk_free_gb": round(disk_free_gb, 2),

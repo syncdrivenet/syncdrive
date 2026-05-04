@@ -34,6 +34,7 @@ class CameraInfo:
     last_seen: Optional[float] = None
     segment: int = 0
     pending_uploads: int = 0
+    ntp_synced: bool = True  # Assume synced until proven otherwise
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -43,6 +44,7 @@ class CameraInfo:
             "last_seen": self.last_seen,
             "segment": self.segment,
             "pending_uploads": self.pending_uploads,
+            "ntp_synced": self.ntp_synced,
             "error": self.error,
         }
 

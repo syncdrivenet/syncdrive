@@ -99,6 +99,7 @@ def get_cameras_state() -> list:
                 "name": name,
                 "connected": cam_info.status.value != "offline",
                 "state": cam_info.status.value,
+                "ntp_synced": getattr(cam_info, "ntp_synced", True),
                 "segment": cam_info.segment,
                 "cpu": None,  # Would need to query camera
                 "ram": None,
@@ -171,12 +172,17 @@ def get_storage_state_ios() -> dict:
 
 
 def get_can_state() -> dict:
-    """Get CAN bus state (placeholder - implement when CAN service ready)."""
-    return {
-        "connected": False,
-        "frame_count": 0,
-        "file_size_bytes": 0,
-    }
+    """Get CAN bus state from CAN listener."""
+    try:
+        from can_listener import get_can_listener
+        can_listener = get_can_listener()
+        return can_listener.get_status()
+    except Exception:
+        return {
+            "connected": False,
+            "ntp_synced": False,
+            "status": "idle",
+        }
 
 
 # Broadcast functions for state changes

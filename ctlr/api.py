@@ -21,6 +21,7 @@ from websocket import (
     broadcast_phone_sync, broadcast_watch_sync
 )
 from database import get_db
+from can_listener import get_can_listener
 
 app = FastAPI(title="Controller API", version="2.0.0")
 
@@ -87,8 +88,12 @@ async def camera_status(camera_name: str):
 
 
 @app.get("/api/preflight")
-async def preflight():
-    """Run preflight check on all cameras and storage."""
+async def preflight(client_time_ms: int = Query(None, description="Phone's current time in Unix ms")):
+    """Run preflight check on all cameras, storage, and CAN bus."""
+    import time
+
+    server_time_ms = int(time.time() * 1000)
+
     orchestrator = get_orchestrator()
     results = await orchestrator.preflight_all()
 
@@ -96,16 +101,30 @@ async def preflight():
     storage_status = get_full_storage_status()
     storage_ready = storage_status.get("all_mounted", False)
 
-    all_ready = all(r.get("ready", False) for r in results.values()) and storage_ready
+    # Check CAN bus status
+    can_listener = get_can_listener()
+    can_status = can_listener.get_status()
+    can_ready = can_status.get("connected", False) and can_status.get("ntp_synced", False)
+
+    # All systems ready check
+    cameras_ready = all(r.get("ready", False) for r in results.values())
+    all_ready = cameras_ready and storage_ready and can_ready
 
     return {
         "success": True,
         "data": {
             "ready": all_ready,
+            "server_time_ms": server_time_ms,
+            "client_time_ms": client_time_ms,  # Echoed back for RTT calculation
             "cameras": results,
             "storage": {
                 "ready": storage_ready,
                 "mounted": storage_status.get("all_mounted", False),
+            },
+            "can": {
+                "ready": can_ready,
+                "connected": can_status.get("connected", False),
+                "ntp_synced": can_status.get("ntp_synced", False),
             },
         },
     }
@@ -233,7 +252,7 @@ async def storage_status():
 
 @app.post("/api/storage/remount")
 async def storage_remount():
-    """Mount storage partitions and resume camera uploads."""
+    """Mount storage partitions and resume camera uploads and CAN logging."""
     success, message = mount_storage()
 
     if not success:
@@ -244,6 +263,10 @@ async def storage_remount():
     resume_results = await orchestrator.resume_all_uploads()
     log_info("api", "Resumed camera uploads after remount", cameras=resume_results)
 
+    # Resume CAN logging
+    can_listener = get_can_listener()
+    can_listener.resume()
+
     # Broadcast storage change to iOS
     await broadcast_storage()
 
@@ -252,6 +275,7 @@ async def storage_remount():
         "message": message,
         "data": get_full_storage_status(),
         "uploads_resumed": True,
+        "can_resumed": True,
     }
 
 
@@ -259,7 +283,7 @@ async def storage_remount():
 async def storage_unmount():
     """
     Safely eject storage (sync + unmount both partitions).
-    Pauses camera uploads first, then unmounts.
+    Pauses camera uploads and CAN logging first, then unmounts.
     """
     # Check if already unmounted
     if not is_mounted(STORAGE_MOUNT):
@@ -274,6 +298,10 @@ async def storage_unmount():
     pause_results = await orchestrator.pause_all_uploads()
     log_info("api", "Paused camera uploads for safe unmount", cameras=pause_results)
 
+    # Pause CAN logging
+    can_listener = get_can_listener()
+    can_listener.pause()
+
     # Small delay to let current uploads finish
     import asyncio
     await asyncio.sleep(2)
@@ -281,8 +309,9 @@ async def storage_unmount():
     success, message = unmount_storage()
 
     if not success:
-        # Resume uploads if unmount failed
+        # Resume uploads and CAN if unmount failed
         await orchestrator.resume_all_uploads()
+        can_listener.resume()
         raise HTTPException(status_code=500, detail=message)
 
     log_info("api", "Storage safely ejected")
@@ -295,6 +324,7 @@ async def storage_unmount():
         "message": message,
         "data": get_full_storage_status(),
         "uploads_paused": True,
+        "can_paused": True,
     }
 
 
@@ -475,24 +505,21 @@ async def sync_watch_data(uuid: str, filename: str, request: Request):
     return {"success": True}
 
 
-# CAN Bus Data (NOT IMPLEMENTED - placeholder)
+# CAN Bus Data
 
 
 @app.get("/api/can/status")
 async def can_status():
     """
-    Get CAN bus status.
+    Get CAN bus listener status.
 
-    NOT IMPLEMENTED - placeholder for future CAN bus integration.
+    Returns connection status, recording state, and frame count.
+    When no ESP32 is connected, mock data is generated during recording.
     """
+    can_listener = get_can_listener()
     return {
         "success": True,
-        "data": {
-            "implemented": False,
-            "message": "CAN bus integration not yet implemented",
-            "connected": False,
-            "last_message": None,
-        },
+        "data": can_listener.get_status(),
     }
 
 

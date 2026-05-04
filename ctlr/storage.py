@@ -468,12 +468,20 @@ async def receive_phone_data(
     content_length: int,
     body_stream: AsyncGenerator[bytes, None],
 ) -> bool:
-    """Receive phone data file (motion, location, etc.) for a session."""
-    config = get_config()
+    """
+    Receive phone data file (motion, location, etc.) for a session.
+
+    Writes directly to export partition (exFAT) since phone data
+    is only uploaded after user presses "Process" in iOS app.
+    """
     db = get_db()
 
-    # Store in session_dir/phone/
-    data_dir = config.storage.recordings_path / uuid / "phone"
+    if not is_mounted(EXPORT_MOUNT):
+        log_error("storage", "Export partition not mounted for phone data")
+        return False
+
+    # Store in export_dir/uuid/phone/
+    data_dir = EXPORT_MOUNT / uuid / "phone"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     temp_path = data_dir / f"{filename}.tmp"
@@ -507,12 +515,20 @@ async def receive_watch_data(
     content_length: int,
     body_stream: AsyncGenerator[bytes, None],
 ) -> bool:
-    """Receive watch data file (heart rate, motion, etc.) for a session."""
-    config = get_config()
+    """
+    Receive watch data file (heart rate, motion, etc.) for a session.
+
+    Writes directly to export partition (exFAT) since watch data
+    is only uploaded after user presses "Process" in iOS app.
+    """
     db = get_db()
 
-    # Store in session_dir/watch/
-    data_dir = config.storage.recordings_path / uuid / "watch"
+    if not is_mounted(EXPORT_MOUNT):
+        log_error("storage", "Export partition not mounted for watch data")
+        return False
+
+    # Store in export_dir/uuid/watch/
+    data_dir = EXPORT_MOUNT / uuid / "watch"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     temp_path = data_dir / f"{filename}.tmp"

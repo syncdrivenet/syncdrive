@@ -14,6 +14,7 @@ from config import get_config, CameraConfig
 from state import get_state, CameraStatus
 from logger import log_info, log_error, log_warning
 from database import get_db
+from can_listener import get_can_listener
 
 
 class Orchestrator:
@@ -74,15 +75,29 @@ class Orchestrator:
             await asyncio.sleep(10)
 
     async def _check_camera(self, cam: CameraConfig):
-        """Check single camera health."""
+        """Check single camera health and status."""
         try:
-            response = await self.client.get(f"{cam.base_url}/health")
+            response = await self.client.get(f"{cam.base_url}/status")
             if response.status_code == 200:
-                self.state.update_camera(cam.name, CameraStatus.ONLINE)
+                data = response.json().get("data", {})
+                state = data.get("state", "idle")
+
+                if state == "recording":
+                    status = CameraStatus.RECORDING
+                else:
+                    status = CameraStatus.ONLINE
+
+                self.state.update_camera(
+                    cam.name,
+                    status,
+                    ntp_synced=data.get("ntp_synced", True),
+                    segment=data.get("segment", 0),
+                    pending_uploads=data.get("pending_uploads", 0),
+                )
             else:
                 self.state.update_camera(cam.name, CameraStatus.ERROR)
         except httpx.ConnectError:
-            self.state.update_camera(cam.name, CameraStatus.OFFLINE)
+            self.state.update_camera(cam.name, CameraStatus.OFFLINE, ntp_synced=False)
         except Exception as e:
             self.state.update_camera(cam.name, CameraStatus.ERROR, error=str(e))
 
@@ -155,6 +170,11 @@ class Orchestrator:
             # Create session in database
             db = get_db()
             db.create_session(session_uuid, cameras_count=len(self.config.cameras))
+
+            # Start CAN listener recording
+            can_listener = get_can_listener()
+            await can_listener.start_recording(session_uuid)
+
             log_info("orchestrator", f"Recording started", uuid=session_uuid)
         else:
             log_error("orchestrator", "All cameras failed to start")
@@ -189,6 +209,10 @@ class Orchestrator:
                 results[cam.name] = {"success": False, "error": str(e)}
 
         await asyncio.gather(*[stop_one(cam) for cam in self.config.cameras])
+
+        # Stop CAN listener recording
+        can_listener = get_can_listener()
+        await can_listener.stop_recording()
 
         # Mark session stopped in database
         db = get_db()

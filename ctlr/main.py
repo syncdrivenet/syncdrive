@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from config import init_config, get_config
 from logger import setup_logging, log_info
 from orchestrator import start_orchestrator, stop_orchestrator
+from can_listener import init_can_listener, get_can_listener
 from api import app as api_app
 
 
@@ -25,12 +26,20 @@ async def lifespan(app: FastAPI):
     # Start orchestrator
     await start_orchestrator()
 
+    # Start CAN listener
+    await init_can_listener(recordings_path=config.storage.recordings_path)
+    log_info("main", "CAN listener started on port 9100")
+
     log_info("main", f"Controller ready on port {config.api.port}")
 
     yield
 
     # Shutdown
     log_info("main", "Controller shutting down")
+
+    # Stop CAN listener
+    can_listener = get_can_listener()
+    await can_listener.stop()
 
     await stop_orchestrator()
 
