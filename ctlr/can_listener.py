@@ -234,7 +234,13 @@ class CANListener:
 
                     parts = line_str.split(',')
                     if len(parts) >= 4:
-                        timestamp = float(parts[0])
+                        raw_ts = float(parts[0])
+                        # ESP32 sends milliseconds, convert to seconds if needed
+                        if raw_ts > 1e12:  # Milliseconds (13+ digits)
+                            timestamp = raw_ts / 1000.0
+                        else:  # Already seconds
+                            timestamp = raw_ts
+
                         can_id = int(parts[1], 16) if parts[1].startswith('0x') else int(parts[1])
                         length = int(parts[2])
                         data = parts[3]
