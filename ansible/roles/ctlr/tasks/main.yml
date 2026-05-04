@@ -13,7 +13,7 @@
       - python3-httpx
       - git
       - exfat-fuse
-      - exfat-utils
+      - exfatprogs
     state: present
     update_cache: true
 
