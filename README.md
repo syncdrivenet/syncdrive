@@ -150,6 +150,7 @@ See individual READMEs:
 - [Controller Node](ctlr/README.md)
 - [Ansible Deployment](ansible/README.md)
 - [Network Setup](docs/NETWORK.md) - mDNS, Tailscale, ports
+- [Image Build](docs/IMAGE_BUILD.md) - SD card image, flashing, first boot
 
 ## API Summary
 
