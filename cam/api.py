@@ -23,6 +23,7 @@ NTP_CACHE_TTL = 30  # seconds
 def _check_ntp_sync() -> bool:
     """
     Check if system clock is properly NTP synchronized.
+    Works with both chrony and systemd-timesyncd.
     Results are cached for NTP_CACHE_TTL seconds.
     """
     global _ntp_cache
@@ -32,7 +33,7 @@ def _check_ntp_sync() -> bool:
         return _ntp_cache["synced"]
 
     try:
-        # Check if NTP is synchronized
+        # Check if NTP is synchronized via timedatectl
         result = subprocess.run(
             ["/usr/bin/timedatectl", "show", "--property=NTPSynchronized", "--value"],
             capture_output=True,
@@ -43,23 +44,27 @@ def _check_ntp_sync() -> bool:
             _ntp_cache = {"synced": False, "checked_at": time.time()}
             return False
 
-        # Check stratum - if > 10, we're synced to a local fallback
+        # Try chronyc for stratum check (if chrony is installed)
+        # If chronyc not available, trust timedatectl (systemd-timesyncd)
         result = subprocess.run(
             ["/usr/bin/chronyc", "tracking"],
             capture_output=True,
             text=True,
             timeout=2
         )
-        synced = True
-        for line in result.stdout.splitlines():
-            if line.startswith("Stratum"):
-                stratum = int(line.split(":")[1].strip())
-                if stratum > 10:
-                    synced = False  # Synced to local fallback, not real NTP
-                break
+        if result.returncode == 0:
+            # chrony is available, check stratum
+            for line in result.stdout.splitlines():
+                if line.startswith("Stratum"):
+                    stratum = int(line.split(":")[1].strip())
+                    if stratum > 10:
+                        _ntp_cache = {"synced": False, "checked_at": time.time()}
+                        return False  # Synced to local fallback, not real NTP
+                    break
 
-        _ntp_cache = {"synced": synced, "checked_at": time.time()}
-        return synced
+        # Either chrony says OK, or using timesyncd (no stratum check available)
+        _ntp_cache = {"synced": True, "checked_at": time.time()}
+        return True
     except Exception:
         _ntp_cache = {"synced": False, "checked_at": time.time()}
         return False
