@@ -93,6 +93,16 @@ class Database:
                     FOREIGN KEY (uuid) REFERENCES sessions(uuid)
                 );
 
+                -- Session camera info (expected segments per camera)
+                CREATE TABLE IF NOT EXISTS session_cameras (
+                    uuid TEXT NOT NULL,
+                    camera TEXT NOT NULL,
+                    expected_segments INTEGER NOT NULL,
+                    reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (uuid, camera),
+                    FOREIGN KEY (uuid) REFERENCES sessions(uuid)
+                );
+
                 -- Indexes for common queries
                 CREATE INDEX IF NOT EXISTS idx_segments_uuid ON segments(uuid);
                 CREATE INDEX IF NOT EXISTS idx_segments_camera ON segments(camera);
@@ -258,6 +268,48 @@ class Database:
                     (uuid,)
                 ).fetchone()
                 return row["count"] if row else 0
+        except Exception as e:
+            return 0
+
+    # Expected segments (camera reports total on stop)
+
+    def set_expected_segments(self, uuid: str, camera: str, expected: int) -> bool:
+        """Set expected segment count for a camera (reported when recording stops)."""
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO session_cameras (uuid, camera, expected_segments)
+                       VALUES (?, ?, ?)""",
+                    (uuid, camera, expected)
+                )
+            log_info("database", f"Set expected segments: {camera}={expected}", uuid=uuid)
+            return True
+        except Exception as e:
+            log_error("database", f"Failed to set expected segments: {e}")
+            return False
+
+    def get_expected_segments(self, uuid: str) -> Dict[str, int]:
+        """Get expected segment count per camera for a session."""
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT camera, expected_segments FROM session_cameras WHERE uuid = ?",
+                    (uuid,)
+                ).fetchall()
+                return {row["camera"]: row["expected_segments"] for row in rows}
+        except Exception as e:
+            log_error("database", f"Failed to get expected segments: {e}")
+            return {}
+
+    def get_total_expected_segments(self, uuid: str) -> int:
+        """Get total expected segment count for a session (sum of all cameras)."""
+        try:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT SUM(expected_segments) as total FROM session_cameras WHERE uuid = ?",
+                    (uuid,)
+                ).fetchone()
+                return row["total"] if row and row["total"] else 0
         except Exception as e:
             return 0
 

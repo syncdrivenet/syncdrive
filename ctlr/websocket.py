@@ -95,15 +95,25 @@ def get_cameras_state() -> list:
         cam_info = state.cameras.get(name)
 
         if cam_info:
+            # Determine actual state: recording if controller is recording and camera is online
+            if state.is_recording and cam_info.status.value == "online":
+                cam_state = "recording"
+            elif cam_info.status.value == "offline":
+                cam_state = "offline"
+            else:
+                cam_state = cam_info.status.value
+
             cameras.append({
                 "name": name,
                 "connected": cam_info.status.value != "offline",
-                "state": cam_info.status.value,
+                "state": cam_state,
                 "ntp_synced": getattr(cam_info, "ntp_synced", True),
                 "segment": cam_info.segment,
                 "cpu": None,  # Would need to query camera
                 "ram": None,
-                "disk_free_gb": None,
+                "disk_free_gb": cam_info.disk_free_gb,
+                "disk_total_gb": getattr(cam_info, "disk_total_gb", None),
+                "disk_used_gb": getattr(cam_info, "disk_used_gb", None),
                 "temp": None,
                 "sync_status": "idle",
                 "sync_segments_synced": 0,
@@ -163,10 +173,14 @@ def get_storage_state_ios() -> dict:
         "logging": {
             "accessible": storage_data.get("mounted", False),
             "free_gb": storage_data.get("free_gb", 0),
+            "total_gb": storage_data.get("total_gb", 0),
+            "used_gb": storage_data.get("used_gb", 0),
         },
         "sync": {
             "accessible": export_data.get("mounted", False),
             "free_gb": export_data.get("free_gb", 0),
+            "total_gb": export_data.get("total_gb", 0),
+            "used_gb": export_data.get("used_gb", 0),
         },
     }
 
@@ -226,13 +240,25 @@ async def broadcast_camera(name: str):
     cam_info = state.cameras.get(name)
 
     if cam_info:
+        # Determine actual state: recording if controller is recording and camera is online
+        if state.is_recording and cam_info.status.value == "online":
+            cam_state = "recording"
+        elif cam_info.status.value == "offline":
+            cam_state = "offline"
+        else:
+            cam_state = cam_info.status.value
+
         await broadcast({
             "type": "camera",
             "data": {
                 "name": name,
                 "connected": cam_info.status.value != "offline",
-                "state": cam_info.status.value,
+                "state": cam_state,
+                "ntp_synced": getattr(cam_info, "ntp_synced", True),
                 "segment": cam_info.segment,
+                "disk_free_gb": cam_info.disk_free_gb,
+                "disk_total_gb": getattr(cam_info, "disk_total_gb", None),
+                "disk_used_gb": getattr(cam_info, "disk_used_gb", None),
                 "sync_segments_queued": cam_info.pending_uploads,
             }
         })
@@ -263,6 +289,28 @@ async def broadcast_sync_progress(camera: str, synced: int, queued: int, status:
             "synced": synced,
             "queued": queued,
             "status": status,
+        }
+    })
+
+
+async def broadcast_upload_progress(
+    camera: str,
+    uuid: str,
+    filename: str,
+    bytes_received: int,
+    total_bytes: int,
+    percent: int
+):
+    """Broadcast real-time upload progress for a segment."""
+    await broadcast({
+        "type": "upload_progress",
+        "data": {
+            "camera": camera,
+            "uuid": uuid,
+            "filename": filename,
+            "bytes_received": bytes_received,
+            "total_bytes": total_bytes,
+            "percent": percent,
         }
     })
 

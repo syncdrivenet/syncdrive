@@ -4,11 +4,19 @@ Records H264 segments using picamera2 with seamless splitting (no gaps).
 Controlled via simple file-based commands.
 """
 
+import fcntl
 import json
+import os
+import sys
 import time
 import signal
 from pathlib import Path
 from typing import Optional
+
+import httpx
+
+# Lock file to prevent duplicate recorder processes
+LOCK_FILE = Path("/data/cam/recorder.lock")
 
 from config import get_config, init_config
 from logger import setup_logging, log_info, log_error, log_warning
@@ -62,13 +70,14 @@ class Recorder:
         self.state_file = Path("/data/cam/state.json")
 
     def _write_state(self):
-        """Write current state for API to read."""
+        """Write current state for API to read (atomic via temp file + rename)."""
         state = {
             "recording": self._recording,
             "uuid": self._uuid,
             "segment": self._segment,
             "duration": int(time.time() - self._session_start_ts) if self._session_start_ts else 0,
             "camera_available": PICAMERA_AVAILABLE,
+            "updated_at": time.time(),
         }
         tmp = self.state_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(state))
@@ -100,6 +109,26 @@ class Recorder:
             log_info("recorder", f"Session metadata saved", uuid=self._uuid)
         except Exception as e:
             log_error("recorder", f"Failed to save metadata: {e}", uuid=self._uuid)
+
+    def _report_completion_to_controller(self):
+        """Report recording completion to controller with total segment count."""
+        if not self._uuid or not self._segment:
+            return
+
+        try:
+            url = f"{self.config.controller.base_url}/api/session/{self._uuid}/camera-complete"
+            params = {
+                "camera": self.config.node.name,
+                "total_segments": self._segment,
+            }
+            response = httpx.post(url, params=params, timeout=5.0)
+            if response.status_code == 200:
+                log_info("recorder", f"Reported completion to controller: {self._segment} segments", uuid=self._uuid)
+            else:
+                log_warning("recorder", f"Controller returned {response.status_code}", uuid=self._uuid)
+        except Exception as e:
+            # Non-critical - controller can infer from queue info
+            log_warning("recorder", f"Failed to report completion: {e}", uuid=self._uuid)
 
     def _get_segment_path(self, uuid: str, segment: int, in_progress: bool = False) -> Path:
         """Get path for a segment file."""
@@ -218,6 +247,9 @@ class Recorder:
         # Write session metadata
         self._write_session_metadata()
 
+        # Report completion to controller (non-blocking, best-effort)
+        self._report_completion_to_controller()
+
         self.splitter = None
 
     def run(self):
@@ -282,7 +314,9 @@ class Recorder:
                 # Check if segment duration reached - seamless split
                 if time.time() - self._segment_start >= segment_duration:
                     self._split_to_next_segment()
-                    self._write_state()
+
+            # Always write state (keeps updated_at fresh for liveness check)
+            self._write_state()
 
             time.sleep(0.1)  # Fast polling for responsive segment splits
 

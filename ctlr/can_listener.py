@@ -54,9 +54,10 @@ class CANListener:
     - Falls back to mock data when no ESP32 connected
     """
 
-    def __init__(self, port: int = 9101, recordings_path: Path = None):
+    def __init__(self, port: int = 9101, recordings_path: Path = None, mock_connected: bool = True):
         self.port = port
         self.recordings_path = recordings_path or Path("/mnt/storage/sessions")
+        self.mock_connected = mock_connected  # Simulate ESP32 connected for testing
         self.state = CANListenerState()
 
         self._server: Optional[asyncio.Server] = None
@@ -161,9 +162,17 @@ class CANListener:
         else:
             status = "idle"
 
+        # Use mock values if no real ESP32 connected and mock mode enabled
+        if self.mock_connected and not self.state.connected:
+            connected = True
+            ntp_synced = True
+        else:
+            connected = self.state.connected
+            ntp_synced = self.state.ntp_synced
+
         return {
-            "connected": self.state.connected,
-            "ntp_synced": self.state.ntp_synced,
+            "connected": connected,
+            "ntp_synced": ntp_synced,
             "status": status,
         }
 

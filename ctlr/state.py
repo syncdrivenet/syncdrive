@@ -35,7 +35,11 @@ class CameraInfo:
     segment: int = 0
     pending_uploads: int = 0
     ntp_synced: bool = True  # Assume synced until proven otherwise
+    disk_free_gb: Optional[float] = None
+    disk_total_gb: Optional[float] = None
+    disk_used_gb: Optional[float] = None
     error: Optional[str] = None
+    upload_queue: List[dict] = field(default_factory=list)  # Per-session upload queue
 
     def to_dict(self) -> dict:
         return {
@@ -45,7 +49,11 @@ class CameraInfo:
             "segment": self.segment,
             "pending_uploads": self.pending_uploads,
             "ntp_synced": self.ntp_synced,
+            "disk_free_gb": self.disk_free_gb,
+            "disk_total_gb": self.disk_total_gb,
+            "disk_used_gb": self.disk_used_gb,
             "error": self.error,
+            "upload_queue": self.upload_queue,
         }
 
 
@@ -65,6 +73,14 @@ class UploadProgress:
             return 0
         return (self.received_bytes / self.total_bytes) * 100
 
+    @property
+    def speed_bps(self) -> float:
+        """Current upload speed in bytes per second."""
+        elapsed = time.time() - self.started_at
+        if elapsed <= 0:
+            return 0
+        return self.received_bytes / elapsed
+
     def to_dict(self) -> dict:
         return {
             "camera": self.camera,
@@ -73,7 +89,36 @@ class UploadProgress:
             "total_bytes": self.total_bytes,
             "received_bytes": self.received_bytes,
             "percent": round(self.percent, 1),
+            "speed_bps": round(self.speed_bps),
         }
+
+
+@dataclass
+class UploadStats:
+    """Tracks upload speed for ETA calculation."""
+    total_bytes: int = 0
+    total_time: float = 0
+    segment_count: int = 0
+
+    @property
+    def avg_speed_bps(self) -> float:
+        """Average upload speed in bytes per second."""
+        if self.total_time <= 0:
+            return 0
+        return self.total_bytes / self.total_time
+
+    @property
+    def avg_segment_size(self) -> int:
+        """Average segment size in bytes."""
+        if self.segment_count <= 0:
+            return 0
+        return self.total_bytes // self.segment_count
+
+    def record_upload(self, size_bytes: int, duration_seconds: float):
+        """Record a completed upload for speed calculation."""
+        self.total_bytes += size_bytes
+        self.total_time += duration_seconds
+        self.segment_count += 1
 
 
 @dataclass
@@ -95,6 +140,9 @@ class State:
 
     # Segment counts per session
     _segments_received: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+    # Upload speed stats (for ETA calculation)
+    _upload_stats: UploadStats = field(default_factory=UploadStats)
 
     @property
     def is_recording(self) -> bool:
@@ -176,6 +224,11 @@ class State:
             if key in self._uploads:
                 upload = self._uploads.pop(key)
 
+                # Record upload speed stats
+                duration = time.time() - upload.started_at
+                if duration > 0:
+                    self._upload_stats.record_upload(upload.total_bytes, duration)
+
                 # Track segment count
                 if upload.uuid not in self._segments_received:
                     self._segments_received[upload.uuid] = {}
@@ -191,6 +244,26 @@ class State:
         """Get segment counts per camera for a session."""
         with self._lock:
             return dict(self._segments_received.get(uuid, {}))
+
+    def get_upload_stats(self) -> dict:
+        """Get upload speed stats for ETA calculation."""
+        with self._lock:
+            return {
+                "avg_speed_bps": round(self._upload_stats.avg_speed_bps),
+                "avg_segment_size": self._upload_stats.avg_segment_size,
+                "segments_tracked": self._upload_stats.segment_count,
+            }
+
+    def estimate_eta_seconds(self, pending_segments: int) -> Optional[int]:
+        """Estimate time to upload remaining segments."""
+        with self._lock:
+            if self._upload_stats.avg_speed_bps <= 0:
+                return None
+            if self._upload_stats.avg_segment_size <= 0:
+                return None
+
+            pending_bytes = pending_segments * self._upload_stats.avg_segment_size
+            return int(pending_bytes / self._upload_stats.avg_speed_bps)
 
     # Export
 

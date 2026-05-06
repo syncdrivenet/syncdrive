@@ -134,6 +134,7 @@ class Uploader:
             "uploading": uploading,
             "progress": progress,
             "paused": self.is_paused,
+            "queue": self._get_queue_info(),
         }
         try:
             tmp = self.state_file.with_suffix(".tmp")
@@ -156,6 +157,32 @@ class Uploader:
                 segments.append(f)
 
         return sorted(segments)
+
+    def _get_queue_info(self) -> list:
+        """Get pending segments grouped by session with queue position."""
+        from collections import defaultdict
+
+        recordings_dir = self.config.recording.recordings_path
+        if not recordings_dir.exists():
+            return []
+
+        # Group segments by session UUID (parent directory)
+        pending = defaultdict(list)
+        for f in recordings_dir.glob("**/seg_*.h264"):
+            if not f.name.startswith("_"):
+                session_uuid = f.parent.name
+                pending[session_uuid].append(f.name)
+
+        # Sort by UUID (matches current upload order)
+        queue = []
+        for position, uuid in enumerate(sorted(pending.keys()), 1):
+            queue.append({
+                "uuid": uuid,
+                "pending": len(pending[uuid]),
+                "position": position,
+            })
+
+        return queue
 
     def _cleanup_orphaned(self):
         """

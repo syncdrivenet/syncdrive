@@ -18,7 +18,8 @@ from orchestrator import get_orchestrator
 from logger import log_info, log_error, log_ios
 from websocket import (
     websocket_endpoint, broadcast_storage, broadcast_sync_progress,
-    broadcast_phone_sync, broadcast_watch_sync
+    broadcast_phone_sync, broadcast_watch_sync, broadcast_controller,
+    broadcast_cameras
 )
 from database import get_db
 from can_listener import get_can_listener
@@ -142,6 +143,10 @@ async def start_recording(
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result.get("error", "Failed to start"))
 
+    # Broadcast state change to iOS
+    await broadcast_controller()
+    await broadcast_cameras()
+
     return {"success": True, "data": result}
 
 
@@ -155,7 +160,76 @@ async def stop_recording():
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result.get("error", "Not recording"))
 
+    # Broadcast state change to iOS
+    await broadcast_controller()
+    await broadcast_cameras()
+
     return {"success": True, "data": result}
+
+
+@app.post("/api/reset")
+async def reset_cameras():
+    """
+    Force reset all cameras to idle state.
+
+    Use when state is out of sync (e.g., controller restarted while cameras were recording).
+    Sends stop command to any camera that's recording and resets controller state.
+    """
+    import asyncio
+
+    orchestrator = get_orchestrator()
+    state = get_state()
+    results = {}
+
+    # Stop any cameras that are recording
+    for cam in orchestrator.config.cameras:
+        try:
+            # Check camera status
+            response = await orchestrator.client.get(f"{cam.base_url}/status", timeout=5.0)
+            if response.status_code == 200:
+                data = response.json().get("data", {})
+                cam_state = data.get("state", "idle")
+
+                if cam_state == "recording":
+                    # Send stop command
+                    stop_response = await orchestrator.client.post(f"{cam.base_url}/record/stop", timeout=5.0)
+                    if stop_response.status_code == 200:
+                        # Wait for camera to actually stop (poll up to 5 seconds)
+                        stopped = False
+                        for _ in range(10):
+                            await asyncio.sleep(0.5)
+                            check = await orchestrator.client.get(f"{cam.base_url}/status", timeout=5.0)
+                            if check.status_code == 200:
+                                if check.json().get("data", {}).get("state") == "idle":
+                                    stopped = True
+                                    break
+                        results[cam.name] = {"was_recording": True, "stopped": stopped}
+                    else:
+                        results[cam.name] = {"was_recording": True, "stopped": False, "error": f"HTTP {stop_response.status_code}"}
+                else:
+                    results[cam.name] = {"was_recording": False, "state": cam_state}
+        except Exception as e:
+            results[cam.name] = {"error": str(e)}
+
+    # Reset controller state to idle
+    state.set_idle()
+
+    # Stop CAN listener if recording
+    can_listener = get_can_listener()
+    if can_listener.state.recording:
+        await can_listener.stop_recording()
+
+    log_info("api", "System reset completed", cameras=results)
+
+    # Broadcast state change to iOS
+    await broadcast_controller()
+    await broadcast_cameras()
+
+    return {
+        "success": True,
+        "message": "All cameras reset to idle",
+        "data": results,
+    }
 
 
 # Segment Upload (from cameras)
@@ -194,16 +268,36 @@ async def upload_segment(camera: str, uuid: str, filename: str, request: Request
     segments = state.get_session_segments(uuid)
     synced = segments.get(camera, 0)
     cam_info = state.get_camera(camera)
-    queued = cam_info.pending_uploads if cam_info else 0
+    pending = cam_info.pending_uploads if cam_info else 0
+    total = synced + pending  # total = received + still pending
 
     await broadcast_sync_progress(
         camera=camera,
         synced=synced,
-        queued=max(synced, queued),  # queued is at least synced
-        status="syncing" if queued > synced else "complete"
+        queued=total,
+        status="syncing" if pending > 0 else "complete"
     )
 
     return {"success": True}
+
+
+@app.post("/api/session/{uuid}/camera-complete")
+async def camera_complete(
+    uuid: str,
+    camera: str = Query(..., description="Camera name"),
+    total_segments: int = Query(..., description="Total segments recorded"),
+):
+    """
+    Camera reports recording complete with total segment count.
+    Called by camera when recording stops.
+    """
+    db = get_db()
+    db.set_expected_segments(uuid, camera, total_segments)
+
+    log_info("api", f"Camera reported complete: {total_segments} segments",
+             uuid=uuid, camera=camera)
+
+    return {"success": True, "uuid": uuid, "camera": camera, "total_segments": total_segments}
 
 
 # Upload Progress (for iOS)
@@ -217,6 +311,172 @@ async def active_uploads():
     return {
         "success": True,
         "data": state.get_active_uploads(),
+    }
+
+
+@app.get("/api/sync/overview")
+async def sync_overview():
+    """
+    Get overall sync status across all sessions (for iOS sync card).
+
+    Returns aggregate progress, ETA, and per-session queue info.
+    During recording, includes live capture/sync counts.
+    """
+    db = get_db()
+    state = get_state()
+
+    # Check if currently recording
+    is_recording = state.is_recording
+    recording_uuid = state.session_uuid
+    recording_info = None
+
+    if is_recording and recording_uuid:
+        # Get live segment counts for current recording
+        captured = 0
+        synced = 0
+        for cam_name, cam_info in state.cameras.items():
+            if cam_info.segment > 0:
+                captured += cam_info.segment
+        # Synced from database
+        synced_counts = db.get_segment_counts(recording_uuid)
+        synced = sum(synced_counts.values())
+
+        # Get active upload info
+        active_uploads = state.get_active_uploads()
+        current_upload = None
+        for upload in active_uploads:
+            if upload["uuid"] == recording_uuid:
+                current_upload = {
+                    "camera": upload["camera"],
+                    "filename": upload["filename"],
+                    "percent": upload["percent"],
+                }
+                break
+
+        recording_info = {
+            "uuid": recording_uuid,
+            "captured": captured,
+            "synced": synced,
+            "current_upload": current_upload,
+        }
+
+    # Get all sessions with pending uploads
+    sessions_data = []
+    total_synced = 0
+    total_pending = 0
+    total_expected = 0
+
+    # Get upload speed stats
+    upload_stats = state.get_upload_stats()
+    avg_segment_time = upload_stats["avg_segment_size"] / upload_stats["avg_speed_bps"] if upload_stats["avg_speed_bps"] > 0 else 0
+
+    # Build queue from camera upload queues (already sorted by position)
+    # Aggregate across all cameras for each session
+    session_pending: dict[str, dict] = {}  # uuid -> {pending, position, cameras}
+
+    for cam_name, cam_info in state.cameras.items():
+        for item in cam_info.upload_queue:
+            uuid = item["uuid"]
+            if uuid not in session_pending:
+                session_pending[uuid] = {
+                    "uuid": uuid,
+                    "pending": 0,
+                    "position": item.get("position", 0),  # Use first camera's position
+                    "cameras": [],
+                }
+            session_pending[uuid]["pending"] += item.get("pending", 0)
+            session_pending[uuid]["cameras"].append({
+                "name": cam_name,
+                "pending": item.get("pending", 0),
+            })
+
+    # Track which sessions we've processed
+    processed_uuids = set()
+
+    # Get synced counts and expected from database for sessions with pending uploads
+    for uuid, info in session_pending.items():
+        processed_uuids.add(uuid)
+        synced_counts = db.get_segment_counts(uuid)
+        expected_counts = db.get_expected_segments(uuid)
+
+        session_synced = sum(synced_counts.values())
+        session_expected = sum(expected_counts.values()) if expected_counts else session_synced + info["pending"]
+
+        # Calculate segments ahead (sum of pending from earlier positions)
+        segments_ahead = sum(
+            s["pending"] for s in session_pending.values()
+            if s["position"] < info["position"]
+        )
+
+        session_eta = int((segments_ahead + info["pending"]) * avg_segment_time) if avg_segment_time > 0 else None
+        session_progress = round((session_synced / session_expected) * 100, 1) if session_expected > 0 else 0
+
+        sessions_data.append({
+            "uuid": uuid,
+            "position": info["position"],
+            "synced": session_synced,
+            "pending": info["pending"],
+            "expected": session_expected,
+            "progress_percent": session_progress,
+            "eta_seconds": session_eta,
+            "segments_ahead": segments_ahead,
+        })
+
+        total_synced += session_synced
+        total_pending += info["pending"]
+        total_expected += session_expected
+
+    # Also include recent sessions from database that are fully synced (no pending)
+    recent_sessions = db.list_sessions(limit=20)
+    for session in recent_sessions:
+        uuid = session["uuid"]
+        if uuid in processed_uuids:
+            continue
+
+        synced_counts = db.get_segment_counts(uuid)
+        session_synced = sum(synced_counts.values())
+
+        # Only include if session has segments
+        if session_synced > 0:
+            expected_counts = db.get_expected_segments(uuid)
+            session_expected = sum(expected_counts.values()) if expected_counts else session_synced
+
+            sessions_data.append({
+                "uuid": uuid,
+                "position": 0,  # Not in queue
+                "synced": session_synced,
+                "pending": 0,
+                "expected": session_expected,
+                "progress_percent": 100.0,
+                "eta_seconds": None,
+                "segments_ahead": 0,
+            })
+
+            total_synced += session_synced
+            total_expected += session_expected
+
+    # Sort: pending sessions first (by position), then synced sessions
+    sessions_data.sort(key=lambda x: (x["pending"] == 0, x["position"]))
+
+    # Overall progress
+    overall_progress = round((total_synced / total_expected) * 100, 1) if total_expected > 0 else 100
+    overall_eta = int(total_pending * avg_segment_time) if avg_segment_time > 0 and total_pending > 0 else None
+
+    return {
+        "success": True,
+        "data": {
+            "syncing": total_pending > 0,
+            "recording": is_recording,
+            "recording_info": recording_info,
+            "synced": total_synced,
+            "pending": total_pending,
+            "expected": total_expected,
+            "progress_percent": overall_progress,
+            "eta_seconds": overall_eta,
+            "speed_bps": upload_stats["avg_speed_bps"],
+            "sessions": sessions_data,
+            "sessions_pending": len([s for s in sessions_data if s["pending"] > 0]),
+        },
     }
 
 
@@ -368,12 +628,101 @@ async def session(uuid: str):
 
 @app.get("/api/sessions/{uuid}/stats")
 async def session_stats(uuid: str):
-    """Get comprehensive stats for a session from database."""
+    """Get comprehensive stats for a session from database + live state."""
     db = get_db()
     stats = db.get_session_stats(uuid)
 
     if not stats.get("exists"):
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get per-camera synced counts from database
+    synced_counts = db.get_segment_counts(uuid)
+
+    # Get expected segments from database (reported by cameras on stop)
+    expected_counts = db.get_expected_segments(uuid)
+
+    # Get pending from live camera state + queue info
+    state = get_state()
+    cameras_detail = []
+    total_synced = 0
+    total_pending = 0
+    total_expected = 0
+    total_segments_ahead = 0  # Segments from OTHER sessions ahead in queue
+
+    for cam_name, cam_info in state.cameras.items():
+        synced = synced_counts.get(cam_name, 0)
+        expected = expected_counts.get(cam_name, 0)
+
+        # Find this session's queue info for this camera
+        session_queue_info = None
+        segments_ahead = 0
+        queue_position = 0
+
+        for item in cam_info.upload_queue:
+            if item["uuid"] == uuid:
+                session_queue_info = item
+                queue_position = item.get("position", 0)
+                break
+            else:
+                # This session is ahead of ours
+                segments_ahead += item.get("pending", 0)
+
+        # Pending for this session from queue, or fallback to expected - synced
+        if session_queue_info:
+            pending = session_queue_info.get("pending", 0)
+        elif expected > 0:
+            pending = max(0, expected - synced)
+        else:
+            pending = 0
+
+        if synced > 0 or pending > 0 or expected > 0:
+            cameras_detail.append({
+                "name": cam_name,
+                "synced": synced,
+                "pending": pending,
+                "expected": expected if expected > 0 else synced + pending,
+                "queue_position": queue_position,
+                "segments_ahead": segments_ahead,
+                "complete": pending == 0 and (expected == 0 or synced >= expected),
+            })
+
+            total_synced += synced
+            total_pending += pending
+            total_expected += expected if expected > 0 else synced + pending
+            total_segments_ahead += segments_ahead
+
+    # Determine sync status
+    is_stopped = stats.get("status") == "stopped"
+    total = total_expected if total_expected > 0 else total_synced + total_pending
+    sync_complete = is_stopped and total_pending == 0 and total_synced > 0
+
+    # Calculate progress percentage
+    progress_percent = round((total_synced / total) * 100, 1) if total > 0 else 0
+
+    # Get upload speed and calculate queue-aware ETA
+    upload_stats = state.get_upload_stats()
+    avg_segment_time = upload_stats["avg_segment_size"] / upload_stats["avg_speed_bps"] if upload_stats["avg_speed_bps"] > 0 else 0
+
+    # ETA includes segments from other sessions ahead in queue
+    total_to_upload = total_segments_ahead + total_pending
+    eta_seconds = int(total_to_upload * avg_segment_time) if avg_segment_time > 0 else None
+
+    # Get active uploads for this session
+    active_uploads = [u for u in state.get_active_uploads() if u["uuid"] == uuid]
+
+    # Add sync info to stats
+    stats["sync"] = {
+        "synced": total_synced,
+        "pending": total_pending,
+        "expected": total_expected,
+        "progress_percent": progress_percent,
+        "complete": sync_complete,
+        "segments_ahead": total_segments_ahead,
+        "eta_seconds": eta_seconds,
+        "speed_bps": upload_stats["avg_speed_bps"],
+    }
+    stats["cameras_detail"] = cameras_detail
+    stats["active_uploads"] = active_uploads
 
     return {
         "success": True,

@@ -3,9 +3,11 @@ Camera API - HTTP endpoints for recording control.
 Communicates with recorder process via file-based commands.
 """
 
+import asyncio
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -13,15 +15,22 @@ from fastapi import FastAPI, HTTPException, Query
 from config import get_config
 from logger import log_info
 
+# NTP sync cache (avoid spawning subprocesses on every request)
+_ntp_cache = {"synced": False, "checked_at": 0}
+NTP_CACHE_TTL = 30  # seconds
+
 
 def _check_ntp_sync() -> bool:
     """
     Check if system clock is properly NTP synchronized.
-
-    Returns False if:
-    - NTP not synchronized
-    - Stratum > 10 (synced to local fallback, not real NTP)
+    Results are cached for NTP_CACHE_TTL seconds.
     """
+    global _ntp_cache
+
+    # Return cached result if fresh
+    if time.time() - _ntp_cache["checked_at"] < NTP_CACHE_TTL:
+        return _ntp_cache["synced"]
+
     try:
         # Check if NTP is synchronized
         result = subprocess.run(
@@ -31,6 +40,7 @@ def _check_ntp_sync() -> bool:
             timeout=2
         )
         if result.stdout.strip().lower() != "yes":
+            _ntp_cache = {"synced": False, "checked_at": time.time()}
             return False
 
         # Check stratum - if > 10, we're synced to a local fallback
@@ -40,19 +50,30 @@ def _check_ntp_sync() -> bool:
             text=True,
             timeout=2
         )
+        synced = True
         for line in result.stdout.splitlines():
             if line.startswith("Stratum"):
                 stratum = int(line.split(":")[1].strip())
                 if stratum > 10:
-                    return False  # Synced to local fallback, not real NTP
+                    synced = False  # Synced to local fallback, not real NTP
                 break
 
-        return True
-    except Exception as e:
-        # Log error for debugging
-        import sys
-        print(f"NTP check error: {e}", file=sys.stderr)
+        _ntp_cache = {"synced": synced, "checked_at": time.time()}
+        return synced
+    except Exception:
+        _ntp_cache = {"synced": False, "checked_at": time.time()}
         return False
+
+
+# Staleness detection
+STALE_THRESHOLD = 5.0  # seconds
+
+
+def _is_recorder_alive(state: dict) -> bool:
+    """Check if recorder state is fresh (updated recently)."""
+    updated_at = state.get("updated_at", 0)
+    return time.time() - updated_at < STALE_THRESHOLD
+
 
 app = FastAPI(title="Camera Node API", version="2.0.0")
 
@@ -90,6 +111,7 @@ async def preflight():
     config = get_config()
     recorder_state = _read_json(RECORDER_STATE)
 
+    recorder_alive = _is_recorder_alive(recorder_state)
     camera_ok = recorder_state.get("camera_available", False)
     is_idle = not recorder_state.get("recording", False)
     ntp_synced = _check_ntp_sync()
@@ -103,10 +125,13 @@ async def preflight():
         disk_free_gb = 0
         disk_ok = False
 
+    ready = recorder_alive and camera_ok and is_idle and disk_ok and ntp_synced
+
     return {
         "success": True,
         "data": {
-            "ready": camera_ok and is_idle and disk_ok and ntp_synced,
+            "ready": ready,
+            "recorder_alive": recorder_alive,
             "camera": camera_ok,
             "idle": is_idle,
             "ntp_synced": ntp_synced,
@@ -124,25 +149,42 @@ async def status():
     recorder_state = _read_json(RECORDER_STATE)
     uploader_state = _read_json(UPLOADER_STATE)
 
+    # Check if recorder is alive (state is fresh)
+    recorder_alive = _is_recorder_alive(recorder_state)
+
+    # If state says recording but recorder is dead, report error
+    recording = recorder_state.get("recording", False)
+    state_str = "recording" if recording else "idle"
+    if recording and not recorder_alive:
+        state_str = "error"
+
     # Disk space
     try:
         disk = shutil.disk_usage(str(config.recording.recordings_path))
         disk_free_gb = disk.free / (1024**3)
+        disk_total_gb = disk.total / (1024**3)
+        disk_used_gb = disk.used / (1024**3)
     except Exception:
         disk_free_gb = 0
+        disk_total_gb = 0
+        disk_used_gb = 0
 
     return {
         "success": True,
         "data": {
-            "state": "recording" if recorder_state.get("recording") else "idle",
+            "state": state_str,
             "uuid": recorder_state.get("uuid"),
             "segment": recorder_state.get("segment", 0),
             "duration": recorder_state.get("duration", 0),
             "camera_available": recorder_state.get("camera_available", False),
+            "recorder_alive": recorder_alive,
             "ntp_synced": _check_ntp_sync(),
             "pending_uploads": uploader_state.get("pending", 0),
             "uploading": uploader_state.get("uploading"),
+            "upload_queue": uploader_state.get("queue", []),
             "disk_free_gb": round(disk_free_gb, 2),
+            "disk_total_gb": round(disk_total_gb, 2),
+            "disk_used_gb": round(disk_used_gb, 2),
             "node": config.node.name,
         },
     }
@@ -153,7 +195,7 @@ async def start_recording(
     uuid: str = Query(..., description="Session UUID"),
     start_at: int = Query(None, description="Synchronized start time (Unix ms)"),
 ):
-    """Start recording session."""
+    """Start recording session. Waits for recorder to confirm."""
     recorder_state = _read_json(RECORDER_STATE)
 
     if recorder_state.get("recording"):
@@ -167,29 +209,49 @@ async def start_recording(
         _send_command(f"start:{uuid}")
 
     log_info("api", f"Recording start command sent", uuid=uuid, start_at=start_at)
-    return {"success": True, "uuid": uuid, "start_at": start_at}
+
+    # Poll for recorder confirmation
+    for _ in range(30):  # 3 second timeout
+        await asyncio.sleep(0.1)
+        state = _read_json(RECORDER_STATE)
+        if state.get("recording") and state.get("uuid") == uuid:
+            log_info("api", f"Recording confirmed", uuid=uuid)
+            return {"success": True, "uuid": uuid, "start_at": start_at}
+
+    raise HTTPException(status_code=500, detail="Recorder failed to start")
 
 
 @app.post("/record/stop")
 async def stop_recording():
-    """Stop current recording session."""
+    """Stop current recording session. Waits for recorder to confirm."""
     recorder_state = _read_json(RECORDER_STATE)
 
     if not recorder_state.get("recording"):
         raise HTTPException(status_code=409, detail="Not recording")
 
     uuid = recorder_state.get("uuid")
+    duration = recorder_state.get("duration", 0)
+    segments = recorder_state.get("segment", 0)
 
     # Send stop command
     _send_command("stop")
 
     log_info("api", f"Recording stop command sent", uuid=uuid)
-    return {
-        "success": True,
-        "uuid": uuid,
-        "duration": recorder_state.get("duration", 0),
-        "segments": recorder_state.get("segment", 0),
-    }
+
+    # Poll for recorder confirmation
+    for _ in range(30):  # 3 second timeout
+        await asyncio.sleep(0.1)
+        state = _read_json(RECORDER_STATE)
+        if not state.get("recording"):
+            log_info("api", f"Recording stop confirmed", uuid=uuid)
+            return {
+                "success": True,
+                "uuid": uuid,
+                "duration": duration,
+                "segments": segments,
+            }
+
+    raise HTTPException(status_code=500, detail="Recorder failed to stop")
 
 
 @app.post("/upload/pause")

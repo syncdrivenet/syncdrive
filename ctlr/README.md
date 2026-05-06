@@ -152,7 +152,64 @@ Warn if offset > 2 seconds
 | `/api/sessions/{uuid}` | GET | Session info |
 | `/api/sessions/{uuid}/stats` | GET | Session stats |
 | `/api/sessions/{uuid}/segments` | GET | Session segments |
-| `/api/export/{uuid}` | POST | Export to exFAT |
+| `/api/sessions/unexported` | GET | List sessions not yet exported |
+
+### Export
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/export/{uuid}` | POST | Export session to exFAT |
+| `/api/export/sessions` | GET | List exported sessions |
+| `/api/export/{uuid}` | DELETE | Delete from export partition |
+
+### Sync Overview (for iOS)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/sync/overview` | GET | Overall sync progress across all sessions |
+
+**Sync Overview Response:**
+```json
+{
+  "syncing": true,
+  "recording": false,
+  "recording_info": null,
+  "synced": 45,
+  "pending": 12,
+  "expected": 57,
+  "progress_percent": 78.9,
+  "eta_seconds": 120,
+  "speed_bps": 15000000,
+  "sessions_pending": 2,
+  "sessions": [
+    {
+      "uuid": "87C99460-...",
+      "position": 1,
+      "synced": 10,
+      "pending": 5,
+      "expected": 15,
+      "progress_percent": 66.7,
+      "eta_seconds": 60,
+      "segments_ahead": 0
+    }
+  ]
+}
+```
+
+**During Recording:**
+```json
+{
+  "recording": true,
+  "recording_info": {
+    "uuid": "87C99460-...",
+    "captured": 7,
+    "synced": 5,
+    "current_upload": {
+      "camera": "melb-02-cam-01",
+      "filename": "seg_0006.h264",
+      "percent": 45
+    }
+  }
+}
+```
 
 ### Phone/Watch Sync (from iOS)
 | Endpoint | Method | Description |
@@ -225,8 +282,108 @@ Status values: `idle` | `recording` | `paused`
 
 **Note:** Phone/watch data goes directly to export partition (exFAT) since it's only uploaded after pressing "Process" in the iOS app.
 
+## WebSocket Messages
+
+The `/ws/status` endpoint provides real-time updates to the iOS app.
+
+### Connection Flow
+1. Client connects → receives `initial` message with full state
+2. Server sends updates as `camera`, `controller`, `storage`, etc.
+3. Client sends `ping` → server responds with `pong`
+
+### Message Types
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `initial` | → client | Full state on connect |
+| `controller` | → client | Recording state changed |
+| `camera` | → client | Single camera update |
+| `cameras` | → client | All cameras update |
+| `storage` | → client | Storage status changed |
+| `system` | → client | CPU/RAM/temp metrics |
+| `upload_progress` | → client | Real-time segment upload progress |
+| `sync` | → client | Camera sync progress |
+| `phone_sync` | → client | Phone data upload status |
+| `watch_sync` | → client | Watch data upload status |
+| `ping` | ↔ | Keepalive |
+| `pong` | → client | Response to ping |
+
+### Camera Message
+```json
+{
+  "type": "camera",
+  "data": {
+    "name": "melb-02-cam-01",
+    "connected": true,
+    "state": "recording",
+    "ntp_synced": true,
+    "segment": 3,
+    "disk_free_gb": 7.5,
+    "disk_total_gb": 8.0,
+    "disk_used_gb": 0.5,
+    "sync_segments_queued": 2
+  }
+}
+```
+
+### Upload Progress Message
+```json
+{
+  "type": "upload_progress",
+  "data": {
+    "camera": "melb-02-cam-01",
+    "uuid": "87C99460-...",
+    "filename": "seg_0001.h264",
+    "bytes_received": 12582912,
+    "total_bytes": 25165824,
+    "percent": 50
+  }
+}
+```
+
+Broadcasts at 0%, 10%, 20%... 100% during segment upload.
+
+### Initial Message Structure
+```json
+{
+  "type": "initial",
+  "data": {
+    "controller": {"ready": true, "recording": false, "uuid": null, "duration": 0},
+    "cameras": [...],
+    "system": {"cpu_percent": 12.5, "mem_percent": 45.2, "temp_c": 52.0},
+    "storage": {"healthy": true, "logging": {...}, "sync": {...}},
+    "can": {"connected": true, "ntp_synced": true, "status": "idle"}
+  }
+}
+```
+
 ## Logs
 
+**Local:**
 ```bash
 journalctl -u syncdrive-ctlr -f
+```
+
+**Centralized (Grafana/Loki):**
+
+Logs are forwarded to a central monitoring server via fluent-bit:
+
+```
+Camera (rsyslog) → Controller (fluent-bit:5514) → Loki (syncdrivev2:3100) → Grafana
+```
+
+- **Grafana URL:** `http://<syncdrivev2-tailscale-ip>:3000`
+- **Dashboard:** SyncDrive Overview
+- **Panels:** Camera Logs, Controller Logs, System Logs, Errors & Warnings
+
+Log queries in Loki:
+```
+# Camera logs (human-readable)
+{ident=~"syncdrive-recorder|syncdrive-uploader"} | json | line_format "{{.message}}"
+
+# Controller logs
+{node="melb-02-ctlr"} |~ "ctlr\\." | json | line_format "{{.MESSAGE}}"
+
+# All errors
+{job="syncdrive"} |~ "(?i)(error|fail|exception)"
 ```

@@ -15,6 +15,7 @@ from state import get_state, CameraStatus
 from logger import log_info, log_error, log_warning
 from database import get_db
 from can_listener import get_can_listener
+from websocket import broadcast_camera
 
 
 class Orchestrator:
@@ -72,15 +73,21 @@ class Orchestrator:
                 except Exception as e:
                     log_warning("orchestrator", f"Error checking {cam.name}: {e}")
 
-            await asyncio.sleep(10)
+            await asyncio.sleep(1)  # Poll cameras every 1s for responsive UI
 
     async def _check_camera(self, cam: CameraConfig):
         """Check single camera health and status."""
+        # Get old state for comparison
+        old_cam = self.state.get_camera(cam.name)
+        old_segment = old_cam.segment if old_cam else 0
+        old_status = old_cam.status if old_cam else None
+
         try:
             response = await self.client.get(f"{cam.base_url}/status")
             if response.status_code == 200:
                 data = response.json().get("data", {})
                 state = data.get("state", "idle")
+                new_segment = data.get("segment", 0)
 
                 if state == "recording":
                     status = CameraStatus.RECORDING
@@ -91,15 +98,31 @@ class Orchestrator:
                     cam.name,
                     status,
                     ntp_synced=data.get("ntp_synced", True),
-                    segment=data.get("segment", 0),
+                    segment=new_segment,
                     pending_uploads=data.get("pending_uploads", 0),
+                    disk_free_gb=data.get("disk_free_gb"),
+                    disk_total_gb=data.get("disk_total_gb"),
+                    disk_used_gb=data.get("disk_used_gb"),
+                    upload_queue=data.get("upload_queue", []),
                 )
+
+                # Broadcast if segment or status changed
+                if new_segment != old_segment or status != old_status:
+                    await broadcast_camera(cam.name)
+
             else:
                 self.state.update_camera(cam.name, CameraStatus.ERROR)
+                if old_status != CameraStatus.ERROR:
+                    await broadcast_camera(cam.name)
+
         except httpx.ConnectError:
             self.state.update_camera(cam.name, CameraStatus.OFFLINE, ntp_synced=False)
+            if old_status != CameraStatus.OFFLINE:
+                await broadcast_camera(cam.name)
         except Exception as e:
             self.state.update_camera(cam.name, CameraStatus.ERROR, error=str(e))
+            if old_status != CameraStatus.ERROR:
+                await broadcast_camera(cam.name)
 
     async def preflight_all(self) -> Dict[str, dict]:
         """Run preflight check on all cameras."""
@@ -154,7 +177,8 @@ class Orchestrator:
                 )
                 if response.status_code == 200:
                     results[cam.name] = {"success": True}
-                    self.state.update_camera(cam.name, CameraStatus.RECORDING)
+                    # Reset segment to 1 for new recording
+                    self.state.update_camera(cam.name, CameraStatus.RECORDING, segment=1)
                 else:
                     results[cam.name] = {"success": False, "error": f"HTTP {response.status_code}"}
             except Exception as e:
@@ -202,7 +226,8 @@ class Orchestrator:
                 if response.status_code == 200:
                     data = response.json()
                     results[cam.name] = data
-                    self.state.update_camera(cam.name, CameraStatus.ONLINE)
+                    # Reset segment to 0 when stopped
+                    self.state.update_camera(cam.name, CameraStatus.ONLINE, segment=0)
                 else:
                     results[cam.name] = {"success": False, "error": f"HTTP {response.status_code}"}
             except Exception as e:

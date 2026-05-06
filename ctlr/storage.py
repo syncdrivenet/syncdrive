@@ -251,17 +251,45 @@ async def receive_segment(
     temp_path = segment_dir / f"{filename}{config.storage.temp_suffix}"
     final_path = segment_dir / filename
 
+    # Import here to avoid circular import
+    from websocket import broadcast_upload_progress
+
     # Start tracking upload progress
     upload_key = state.start_upload(camera, uuid, filename, content_length)
 
+    # Broadcast upload started
+    await broadcast_upload_progress(
+        camera=camera,
+        uuid=uuid,
+        filename=filename,
+        bytes_received=0,
+        total_bytes=content_length,
+        percent=0,
+    )
+
     try:
         received = 0
+        last_broadcast_percent = 0
 
         with open(temp_path, "wb") as f:
             async for chunk in body_stream:
                 f.write(chunk)
                 received += len(chunk)
                 state.update_upload(upload_key, received)
+
+                # Broadcast progress every 10%
+                if content_length > 0:
+                    percent = int((received / content_length) * 100)
+                    if percent >= last_broadcast_percent + 10:
+                        last_broadcast_percent = (percent // 10) * 10
+                        await broadcast_upload_progress(
+                            camera=camera,
+                            uuid=uuid,
+                            filename=filename,
+                            bytes_received=received,
+                            total_bytes=content_length,
+                            percent=percent,
+                        )
 
         # Verify we got everything
         if received != content_length:
@@ -279,6 +307,16 @@ async def receive_segment(
 
         # Mark upload complete in state
         state.finish_upload(upload_key)
+
+        # Broadcast upload complete
+        await broadcast_upload_progress(
+            camera=camera,
+            uuid=uuid,
+            filename=filename,
+            bytes_received=received,
+            total_bytes=content_length,
+            percent=100,
+        )
 
         # Record in database for persistence
         db.insert_segment(uuid, camera, filename, received)
