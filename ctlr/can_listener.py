@@ -1,34 +1,21 @@
 """
 CAN bus TCP listener for controller.
 
-Receives CAN frames from ESP32 via TCP (port 9100) and logs them
+Receives CAN frames from ESP32 via TCP (port 9101) and logs them
 during recording sessions.
 
 ESP32 Format: ts,id,len,data\n
-Example: 1714844321.234,0x123,8,AABBCCDDEEFF0011
-
-When no ESP32 is connected, generates mock data for testing.
+Example: 1714844321234,123,8,AABBCCDDEEFF0011
 """
 
 import asyncio
 import time
-import random
 from pathlib import Path
 from typing import Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from logger import log_info, log_error, log_warning
 from storage import is_mounted, STORAGE_MOUNT
-
-
-# CAN frame IDs for mock data (common OBD-II PIDs)
-MOCK_CAN_IDS = [
-    0x7E8,  # Engine RPM response
-    0x7E9,  # Vehicle speed response
-    0x7EA,  # Coolant temp response
-    0x7EB,  # Throttle position
-    0x7EC,  # Fuel level
-]
 
 
 @dataclass
@@ -42,28 +29,24 @@ class CANListenerState:
     frames_received: int = 0
     last_frame_time: Optional[float] = None
     paused: bool = False  # Paused for SSD unmount
-    mock_mode: bool = False
 
 
 class CANListener:
     """
     TCP server for receiving CAN bus data from ESP32.
 
-    - Listens on port 9100
+    - Listens on port 9101
     - Logs CAN frames to session directory during recording
-    - Falls back to mock data when no ESP32 connected
     """
 
-    def __init__(self, port: int = 9101, recordings_path: Path = None, mock_connected: bool = True):
+    def __init__(self, port: int = 9101, recordings_path: Path = None):
         self.port = port
         self.recordings_path = recordings_path or Path("/mnt/storage/sessions")
-        self.mock_connected = mock_connected  # Simulate ESP32 connected for testing
         self.state = CANListenerState()
 
         self._server: Optional[asyncio.Server] = None
         self._log_file: Optional[object] = None
         self._log_path: Optional[Path] = None
-        self._mock_task: Optional[asyncio.Task] = None
         self._running = False
 
     async def start(self):
@@ -79,14 +62,6 @@ class CANListener:
     async def stop(self):
         """Stop the TCP server."""
         self._running = False
-
-        if self._mock_task:
-            self._mock_task.cancel()
-            try:
-                await self._mock_task
-            except asyncio.CancelledError:
-                pass
-            self._mock_task = None
 
         if self._server:
             self._server.close()
@@ -106,27 +81,14 @@ class CANListener:
         if not self.state.paused and is_mounted(STORAGE_MOUNT):
             self._open_log(session_uuid)
 
-        # If no ESP32 connected, start mock data
-        if not self.state.connected:
-            self.state.mock_mode = True
-            self._mock_task = asyncio.create_task(self._generate_mock_data())
-            log_info("can", "Started mock CAN data generation", uuid=session_uuid)
-        else:
-            self.state.mock_mode = False
+        if self.state.connected:
             log_info("can", "Recording CAN data from ESP32", uuid=session_uuid)
+        else:
+            log_warning("can", "Recording started but ESP32 not connected", uuid=session_uuid)
 
     async def stop_recording(self):
         """Stop logging CAN data."""
         self.state.recording = False
-
-        # Stop mock data generation
-        if self._mock_task:
-            self._mock_task.cancel()
-            try:
-                await self._mock_task
-            except asyncio.CancelledError:
-                pass
-            self._mock_task = None
 
         # Close log file
         frames = self.state.frames_received
@@ -154,7 +116,6 @@ class CANListener:
 
     def get_status(self) -> dict:
         """Get current status for iOS app."""
-        # Determine status string
         if self.state.paused:
             status = "paused"
         elif self.state.recording:
@@ -162,17 +123,9 @@ class CANListener:
         else:
             status = "idle"
 
-        # Use mock values if no real ESP32 connected and mock mode enabled
-        if self.mock_connected and not self.state.connected:
-            connected = True
-            ntp_synced = True
-        else:
-            connected = self.state.connected
-            ntp_synced = self.state.ntp_synced
-
         return {
-            "connected": connected,
-            "ntp_synced": ntp_synced,
+            "connected": self.state.connected,
+            "ntp_synced": self.state.ntp_synced,
             "status": status,
         }
 
@@ -219,16 +172,6 @@ class CANListener:
 
         log_info("can", f"ESP32 connected from {self.state.client_addr}")
 
-        # Stop mock data if running
-        if self._mock_task:
-            self._mock_task.cancel()
-            try:
-                await self._mock_task
-            except asyncio.CancelledError:
-                pass
-            self._mock_task = None
-            self.state.mock_mode = False
-
         try:
             while self._running:
                 line = await reader.readline()
@@ -238,7 +181,7 @@ class CANListener:
                 # Parse: ts,id,len,data
                 try:
                     line_str = line.decode('utf-8').strip()
-                    if not line_str or line_str.startswith('#'):
+                    if not line_str or line_str.startswith('ts,'):  # Skip empty or header
                         continue
 
                     parts = line_str.split(',')
@@ -250,12 +193,11 @@ class CANListener:
                         else:  # Already seconds
                             timestamp = raw_ts
 
-                        can_id = int(parts[1], 16) if parts[1].startswith('0x') else int(parts[1])
+                        can_id = int(parts[1], 16) if parts[1].startswith('0x') else int(parts[1], 16)
                         length = int(parts[2])
                         data = parts[3]
 
                         # Check NTP sync - timestamp should be within 2s of current time
-                        # Typical NTP offset is <100ms, 2s allows for network jitter
                         time_diff = abs(timestamp - time.time())
                         self.state.ntp_synced = time_diff < 2
 
@@ -274,50 +216,8 @@ class CANListener:
             await writer.wait_closed()
             self.state.connected = False
             self.state.client_addr = None
+            self.state.ntp_synced = False
             log_info("can", "ESP32 disconnected")
-
-            # Restart mock data if still recording
-            if self.state.recording and not self.state.mock_mode:
-                self.state.mock_mode = True
-                self._mock_task = asyncio.create_task(self._generate_mock_data())
-
-    async def _generate_mock_data(self):
-        """Generate mock CAN data for testing."""
-        log_info("can", "Starting mock CAN data generation")
-
-        try:
-            while self.state.recording and self._running:
-                if not self.state.paused:
-                    timestamp = time.time()
-                    can_id = random.choice(MOCK_CAN_IDS)
-                    length = 8
-
-                    # Generate mock data based on CAN ID
-                    if can_id == 0x7E8:  # RPM (random 800-6000)
-                        rpm = random.randint(800, 6000)
-                        data = f"{rpm:04X}00000000"
-                    elif can_id == 0x7E9:  # Speed (random 0-120 km/h)
-                        speed = random.randint(0, 120)
-                        data = f"{speed:02X}00000000000000"
-                    elif can_id == 0x7EA:  # Coolant temp (random 70-100 C)
-                        temp = random.randint(70, 100)
-                        data = f"{temp:02X}00000000000000"
-                    elif can_id == 0x7EB:  # Throttle (random 0-100%)
-                        throttle = random.randint(0, 100)
-                        data = f"{throttle:02X}00000000000000"
-                    else:  # Fuel level (random 10-80%)
-                        fuel = random.randint(10, 80)
-                        data = f"{fuel:02X}00000000000000"
-
-                    self._write_frame(timestamp, can_id, length, data)
-
-                # ~10 frames per second (typical CAN bus polling rate)
-                await asyncio.sleep(0.1)
-
-        except asyncio.CancelledError:
-            pass
-        finally:
-            log_info("can", "Stopped mock CAN data generation")
 
 
 # Global instance
