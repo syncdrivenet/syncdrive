@@ -46,21 +46,25 @@ def _check_ntp_sync() -> bool:
 
         # Try chronyc for stratum check (if chrony is installed)
         # If chronyc not available, trust timedatectl (systemd-timesyncd)
-        result = subprocess.run(
-            ["/usr/bin/chronyc", "tracking"],
-            capture_output=True,
-            text=True,
-            timeout=2
-        )
-        if result.returncode == 0:
-            # chrony is available, check stratum
-            for line in result.stdout.splitlines():
-                if line.startswith("Stratum"):
-                    stratum = int(line.split(":")[1].strip())
-                    if stratum > 10:
-                        _ntp_cache = {"synced": False, "checked_at": time.time()}
-                        return False  # Synced to local fallback, not real NTP
-                    break
+        try:
+            result = subprocess.run(
+                ["/usr/bin/chronyc", "tracking"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                # chrony is available, check stratum
+                for line in result.stdout.splitlines():
+                    if line.startswith("Stratum"):
+                        stratum = int(line.split(":")[1].strip())
+                        if stratum > 10:
+                            _ntp_cache = {"synced": False, "checked_at": time.time()}
+                            return False  # Synced to local fallback, not real NTP
+                        break
+        except FileNotFoundError:
+            # chronyc not installed, using systemd-timesyncd - that's OK
+            pass
 
         # Either chrony says OK, or using timesyncd (no stratum check available)
         _ntp_cache = {"synced": True, "checked_at": time.time()}
