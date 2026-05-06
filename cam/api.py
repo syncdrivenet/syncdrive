@@ -305,5 +305,6 @@ async def shutdown():
     import subprocess
     log_info("api", "Shutdown requested")
     # Run shutdown in background - returns before shutdown completes
-    subprocess.Popen(["sudo", "shutdown", "-h", "now"])
+    # Use full paths for systemd service (PATH may not include /usr/bin)
+    subprocess.Popen(["/usr/bin/sudo", "/usr/sbin/shutdown", "-h", "now"])
     return {"success": True, "message": "Shutting down"}

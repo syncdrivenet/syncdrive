@@ -942,7 +942,8 @@ async def shutdown_all():
              cameras=camera_results, offline=offline_status, storage_unmounted=unmount_success)
 
     # Step 5: Shutdown controller
-    subprocess.Popen(["sudo", "shutdown", "-h", "now"])
+    # Use full paths for systemd service (PATH may not include /usr/bin)
+    subprocess.Popen(["/usr/bin/sudo", "/usr/sbin/shutdown", "-h", "now"])
 
     return {
         "success": True,
