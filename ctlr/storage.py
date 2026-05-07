@@ -19,7 +19,6 @@ from database import get_db
 
 # Mount points for the two partitions
 STORAGE_MOUNT = Path("/mnt/storage")  # ext4 - active storage
-ARCHIVE_PATH = STORAGE_MOUNT / "archive"  # Archive folder on storage partition
 EXPORT_MOUNT = Path("/mnt/export")    # exFAT - Mac-readable export
 
 
@@ -740,72 +739,6 @@ def delete_exported_session(uuid: str) -> Tuple[bool, str]:
     except Exception as e:
         log_error("storage", f"Failed to delete exported session: {e}")
         return False, str(e)
-
-
-def archive_exports() -> Tuple[bool, str, dict]:
-    """
-    Move all sessions from export partition to archive folder on storage partition.
-    This cleans up the export drive for new sessions.
-    Returns (success, message, details).
-    """
-    if not is_mounted(EXPORT_MOUNT):
-        return False, "Export partition not mounted", {}
-
-    if not is_mounted(STORAGE_MOUNT):
-        return False, "Storage partition not mounted", {}
-
-    # Create archive directory
-    ARCHIVE_PATH.mkdir(parents=True, exist_ok=True)
-
-    archived = []
-    skipped = []
-    errors = []
-    total_size = 0
-
-    for session_dir in EXPORT_MOUNT.iterdir():
-        if not session_dir.is_dir():
-            continue
-
-        # Skip system directories
-        if session_dir.name.startswith("."):
-            skipped.append(session_dir.name)
-            continue
-
-        dest = ARCHIVE_PATH / session_dir.name
-
-        try:
-            # Check if already archived
-            if dest.exists():
-                skipped.append(f"{session_dir.name} (already archived)")
-                continue
-
-            # Get size before moving
-            size = sum(f.stat().st_size for f in session_dir.rglob("*") if f.is_file())
-
-            # Move to archive (shutil.move handles cross-filesystem)
-            log_info("storage", f"Archiving {session_dir.name} ({size / (1024*1024):.1f} MB)...")
-            shutil.move(str(session_dir), str(dest))
-
-            archived.append(session_dir.name)
-            total_size += size
-
-        except Exception as e:
-            log_error("storage", f"Failed to archive {session_dir.name}: {e}")
-            errors.append(f"{session_dir.name}: {e}")
-
-    details = {
-        "archived": archived,
-        "skipped": skipped,
-        "errors": errors,
-        "total_archived": len(archived),
-        "total_size_mb": round(total_size / (1024 * 1024), 2),
-    }
-
-    if errors:
-        return False, f"Archived {len(archived)} sessions with {len(errors)} errors", details
-
-    log_info("storage", f"Archived {len(archived)} sessions ({total_size / (1024*1024):.1f} MB)")
-    return True, f"Archived {len(archived)} sessions ({total_size / (1024*1024):.1f} MB)", details
 
 
 def validate_session(uuid: str) -> dict:
