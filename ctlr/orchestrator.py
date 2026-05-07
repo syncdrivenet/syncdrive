@@ -92,6 +92,7 @@ class Orchestrator:
         old_cam = self.state.get_camera(cam.name)
         old_segment = old_cam.segment if old_cam else 0
         old_status = old_cam.status if old_cam else None
+        old_ntp_synced = old_cam.ntp_synced if old_cam else None
 
         try:
             response = await self.client.get(f"{cam.base_url}/status")
@@ -99,6 +100,7 @@ class Orchestrator:
                 data = response.json().get("data", {})
                 state = data.get("state", "idle")
                 new_segment = data.get("segment", 0)
+                new_ntp_synced = data.get("ntp_synced", True)
 
                 if state == "recording":
                     status = CameraStatus.RECORDING
@@ -108,7 +110,7 @@ class Orchestrator:
                 self.state.update_camera(
                     cam.name,
                     status,
-                    ntp_synced=data.get("ntp_synced", True),
+                    ntp_synced=new_ntp_synced,
                     segment=new_segment,
                     pending_uploads=data.get("pending_uploads", 0),
                     disk_free_gb=data.get("disk_free_gb"),
@@ -117,8 +119,8 @@ class Orchestrator:
                     upload_queue=data.get("upload_queue", []),
                 )
 
-                # Broadcast if segment or status changed
-                if new_segment != old_segment or status != old_status:
+                # Broadcast if segment, status, or NTP sync changed
+                if new_segment != old_segment or status != old_status or new_ntp_synced != old_ntp_synced:
                     await broadcast_camera(cam.name)
 
             else:
