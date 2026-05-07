@@ -141,7 +141,7 @@ class CANListener:
 
         # Write header if new file
         if self._log_path.stat().st_size == 0:
-            self._log_file.write("timestamp,can_id,length,data\n")
+            self._log_file.write("timestamp,pi_time,can_id,length,data\n")
             self._log_file.flush()
 
     def _close_log(self):
@@ -157,7 +157,8 @@ class CANListener:
             return
 
         try:
-            self._log_file.write(f"{timestamp:.3f},0x{can_id:03X},{length},{data}\n")
+            pi_time = time.time()
+            self._log_file.write(f"{timestamp:.3f},{pi_time:.3f},0x{can_id:03X},{length},{data}\n")
             self._log_file.flush()
             self.state.frames_received += 1
             self.state.last_frame_time = timestamp
