@@ -15,7 +15,7 @@ from state import get_state, CameraStatus
 from logger import log_info, log_error, log_warning
 from database import get_db
 from can_listener import get_can_listener
-from websocket import broadcast_camera
+from websocket import broadcast_camera, broadcast_can
 
 
 class Orchestrator:
@@ -33,7 +33,9 @@ class Orchestrator:
         self.state = get_state()
         self.client: Optional[httpx.AsyncClient] = None
         self._monitor_task: Optional[asyncio.Task] = None
+        self._can_monitor_task: Optional[asyncio.Task] = None
         self._running = False
+        self._last_can_status: Optional[dict] = None
 
     async def start(self):
         """Start the orchestrator."""
@@ -45,6 +47,8 @@ class Orchestrator:
 
         # Start camera monitor
         self._monitor_task = asyncio.create_task(self._monitor_cameras())
+        # Start CAN monitor
+        self._can_monitor_task = asyncio.create_task(self._monitor_can())
 
         log_info("orchestrator", "Orchestrator started")
 
@@ -56,6 +60,13 @@ class Orchestrator:
             self._monitor_task.cancel()
             try:
                 await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._can_monitor_task:
+            self._can_monitor_task.cancel()
+            try:
+                await self._can_monitor_task
             except asyncio.CancelledError:
                 pass
 
@@ -123,6 +134,23 @@ class Orchestrator:
             self.state.update_camera(cam.name, CameraStatus.ERROR, error=str(e))
             if old_status != CameraStatus.ERROR:
                 await broadcast_camera(cam.name)
+
+    async def _monitor_can(self):
+        """Background task to monitor CAN bus status and broadcast on change."""
+        while self._running:
+            try:
+                can_listener = get_can_listener()
+                current_status = can_listener.get_status()
+
+                # Broadcast if status changed
+                if current_status != self._last_can_status:
+                    self._last_can_status = current_status
+                    await broadcast_can()
+
+            except Exception as e:
+                log_warning("orchestrator", f"Error checking CAN status: {e}")
+
+            await asyncio.sleep(1)  # Poll CAN status every 1s
 
     async def preflight_all(self) -> Dict[str, dict]:
         """Run preflight check on all cameras."""

@@ -337,3 +337,11 @@ async def broadcast_watch_sync(uuid: str, filename: str, status: str = "complete
             "status": status,
         }
     })
+
+
+async def broadcast_can():
+    """Broadcast CAN bus state update."""
+    await broadcast({
+        "type": "can",
+        "data": get_can_state()
+    })
