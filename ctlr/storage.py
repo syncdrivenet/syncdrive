@@ -521,8 +521,6 @@ def validate_session(uuid: str) -> dict:
         "issues": [],
         "cameras": {},
         "can": {},
-        "phone": {},
-        "watch": {},
     }
 
     # Check session exists
@@ -607,18 +605,6 @@ def validate_session(uuid: str) -> dict:
         }
         result["issues"].append("CAN log missing")
         result["complete"] = False
-
-    # Check phone data
-    phone_synced = session.get("phone_synced", 0)
-    result["phone"] = {
-        "synced": bool(phone_synced),
-    }
-
-    # Check watch data
-    watch_synced = session.get("watch_synced", 0)
-    result["watch"] = {
-        "synced": bool(watch_synced),
-    }
 
     # Summary stats
     result["summary"] = {
