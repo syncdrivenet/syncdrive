@@ -570,7 +570,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\"} |~ \"(?i)(api|uvicorn|http|PUT|GET|POST|upload|segment|request|response|endpoint)\"",
+            "expr": "{job=\"syncdrive\", node=\"melb-01-ctlr\"}",
             "legendFormat": "",
             "refId": "A"
           }
