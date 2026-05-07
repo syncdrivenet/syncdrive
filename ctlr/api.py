@@ -15,7 +15,7 @@ from storage import (
     export_session, list_exported_sessions, delete_exported_session
 )
 from orchestrator import get_orchestrator
-from logger import log_info, log_error, log_ios
+from logger import log_info, log_error, log_ios, log_event
 from websocket import (
     websocket_endpoint, broadcast_storage, broadcast_sync_progress,
     broadcast_phone_sync, broadcast_watch_sync, broadcast_controller,
@@ -111,6 +111,57 @@ async def preflight(client_time_ms: int = Query(None, description="Phone's curre
     cameras_ready = all(r.get("ready", False) for r in results.values())
     all_ready = cameras_ready and storage_ready and can_ready
 
+    # Build camera summary for logging
+    camera_summary = {}
+    cameras_not_ready = []
+    for name, r in results.items():
+        camera_summary[name] = {
+            "ready": r.get("ready", False),
+            "ntp": r.get("ntp_synced", False),
+            "disk_ok": r.get("disk_ok", False),
+            "camera": r.get("camera", False),
+        }
+        if not r.get("ready", False):
+            reasons = []
+            if not r.get("ntp_synced", True):
+                reasons.append("ntp")
+            if not r.get("disk_ok", True):
+                reasons.append("disk")
+            if not r.get("camera", True):
+                reasons.append("camera")
+            if not r.get("recorder_alive", True):
+                reasons.append("recorder")
+            cameras_not_ready.append(f"{name}({','.join(reasons) or 'unknown'})")
+
+    # Log the preflight event
+    if all_ready:
+        log_event(
+            "preflight", "success",
+            f"Preflight passed: {len(results)} cameras ready",
+            cameras=camera_summary,
+            storage_ready=storage_ready,
+            can_connected=can_status.get("connected", False),
+        )
+    else:
+        issues = []
+        if cameras_not_ready:
+            issues.append(f"cameras: {', '.join(cameras_not_ready)}")
+        if not storage_ready:
+            issues.append("storage not mounted")
+        if not can_status.get("connected", False):
+            issues.append("CAN not connected")
+        elif not can_status.get("ntp_synced", False):
+            issues.append("CAN NTP not synced")
+
+        log_event(
+            "preflight", "failure",
+            f"Preflight failed: {'; '.join(issues)}",
+            cameras=camera_summary,
+            storage_ready=storage_ready,
+            can_connected=can_status.get("connected", False),
+            issues=issues,
+        )
+
     return {
         "success": True,
         "data": {
@@ -141,7 +192,23 @@ async def start_recording(
     result = await orchestrator.start_recording(session_uuid=uuid)
 
     if not result["success"]:
+        # Log failure event
+        log_event(
+            "record_start", "failure",
+            f"Recording start failed: {result.get('error', 'Unknown error')}",
+            uuid=uuid,
+            error=result.get("error"),
+            camera_results=result.get("cameras", {}),
+        )
         raise HTTPException(status_code=400, detail=result.get("error", "Failed to start"))
+
+    # Log success event
+    log_event(
+        "record_start", "success",
+        f"Recording started: {result.get('uuid', uuid)}",
+        uuid=result.get("uuid", uuid),
+        cameras_started=list(result.get("cameras", {}).keys()),
+    )
 
     # Broadcast state change to iOS
     await broadcast_controller()
@@ -154,11 +221,28 @@ async def start_recording(
 async def stop_recording():
     """Stop recording on all cameras."""
     orchestrator = get_orchestrator()
+    state = get_state()
+    current_uuid = state.uuid
 
     result = await orchestrator.stop_recording()
 
     if not result["success"]:
+        log_event(
+            "record_stop", "failure",
+            f"Recording stop failed: {result.get('error', 'Unknown error')}",
+            uuid=current_uuid,
+            error=result.get("error"),
+        )
         raise HTTPException(status_code=400, detail=result.get("error", "Not recording"))
+
+    # Log success event
+    log_event(
+        "record_stop", "success",
+        f"Recording stopped: {current_uuid}",
+        uuid=current_uuid,
+        duration=result.get("duration"),
+        cameras_stopped=list(result.get("cameras", {}).keys()),
+    )
 
     # Broadcast state change to iOS
     await broadcast_controller()

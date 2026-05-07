@@ -119,6 +119,29 @@ def log_debug(component: str, message: str, **extra):
     log(component, message, "DEBUG", **extra)
 
 
+def log_event(event_type: str, result: str, message: str, **details):
+    """
+    Log a structured event for Grafana visualization.
+
+    Events are logged with a consistent structure for easy querying:
+    - event: preflight, record_start, record_stop, error
+    - result: success, failure, warning
+    - Additional details as key-value pairs
+    """
+    logger = get_logger("events")
+    extra = {
+        "event": event_type,
+        "result": result,
+        **details
+    }
+    if result == "failure":
+        logger.error(message, extra=extra)
+    elif result == "warning":
+        logger.warning(message, extra=extra)
+    else:
+        logger.info(message, extra=extra)
+
+
 def log_ios(node: str, component: str, level: str, message: str, **extra):
     """
     Write iOS app log to separate file for Fluent Bit.

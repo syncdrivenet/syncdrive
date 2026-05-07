@@ -6,7 +6,7 @@ syncdrive_version: main
 syncdrive_path: /home/pi/syncdrive
 
 # Controller settings
-controller_host: melb-02-ctlr.local
+controller_host: 192.168.8.145
 controller_port: 8000
 
 # Recording settings

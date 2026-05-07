@@ -395,16 +395,168 @@
       },
       {
         "id": 20,
-        "title": "Logs",
+        "title": "Recording Events",
         "type": "row",
         "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
+        "collapsed": false
+      },
+      {
+        "id": 22,
+        "title": "Recording Events Timeline",
+        "type": "logs",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 24},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "Preflight checks, recording start/stop events",
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": true,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\"} | json | component=\"ctlr.events\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 23,
+        "title": "Preflight Results",
+        "type": "table",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 30},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "Recent preflight check results",
+        "fieldConfig": {
+          "defaults": {},
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "result"},
+              "properties": [
+                {
+                  "id": "custom.cellOptions",
+                  "value": {
+                    "type": "color-background",
+                    "mode": "gradient"
+                  }
+                },
+                {
+                  "id": "mappings",
+                  "value": [
+                    {"type": "value", "options": {"success": {"color": "green", "index": 0}}},
+                    {"type": "value", "options": {"failure": {"color": "red", "index": 1}}}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "showHeader": true,
+          "cellHeight": "sm"
+        },
+        "transformations": [
+          {
+            "id": "extractFields",
+            "options": {
+              "source": "Line",
+              "format": "json"
+            }
+          },
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {"Line": true, "labels": true, "tsNs": true},
+              "indexByName": {},
+              "renameByName": {}
+            }
+          }
+        ],
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\"} | json | component=\"ctlr.events\" | event=\"preflight\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 24,
+        "title": "Recording Sessions",
+        "type": "table",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 30},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "Recording start/stop events",
+        "fieldConfig": {
+          "defaults": {},
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "event"},
+              "properties": [
+                {
+                  "id": "custom.cellOptions",
+                  "value": {
+                    "type": "color-background",
+                    "mode": "gradient"
+                  }
+                },
+                {
+                  "id": "mappings",
+                  "value": [
+                    {"type": "value", "options": {"record_start": {"color": "green", "index": 0}}},
+                    {"type": "value", "options": {"record_stop": {"color": "blue", "index": 1}}}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "showHeader": true,
+          "cellHeight": "sm"
+        },
+        "transformations": [
+          {
+            "id": "extractFields",
+            "options": {
+              "source": "Line",
+              "format": "json"
+            }
+          },
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {"Line": true, "labels": true, "tsNs": true},
+              "indexByName": {},
+              "renameByName": {}
+            }
+          }
+        ],
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\"} | json | component=\"ctlr.events\" | event=~\"record_start|record_stop\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 25,
+        "title": "Logs",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36},
         "collapsed": false
       },
       {
         "id": 21,
         "title": "API Logs",
         "type": "logs",
-        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 37},
         "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
         "options": {
           "showTime": true,
