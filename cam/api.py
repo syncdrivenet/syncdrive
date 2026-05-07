@@ -220,7 +220,8 @@ async def start_recording(
     log_info("api", f"Recording start command sent", uuid=uuid, start_at=start_at)
 
     # Poll for recorder confirmation
-    for _ in range(30):  # 3 second timeout
+    # Timeout needs to account for: sync delay (up to 2s) + camera init (2-4s)
+    for _ in range(100):  # 10 second timeout
         await asyncio.sleep(0.1)
         state = _read_json(RECORDER_STATE)
         if state.get("recording") and state.get("uuid") == uuid:
