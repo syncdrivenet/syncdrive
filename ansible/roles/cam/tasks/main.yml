@@ -9,7 +9,6 @@
       - python3-picamera2
       - python3-venv
       - git
-      - fluent-bit
     state: present
     update_cache: true
 
@@ -86,21 +85,3 @@
     - syncdrive-recorder
     - syncdrive-uploader
     - syncdrive-cam-api
-
-# Fluent Bit for log shipping to Loki
-- name: Deploy Fluent Bit config
-  become: true
-  copy:
-    src: "{{ syncdrive_path }}/cam/systemd/fluent-bit-cam.conf"
-    dest: /etc/fluent-bit/fluent-bit.conf
-    remote_src: yes
-    mode: '0644'
-  notify: Restart fluent-bit
-
-- name: Enable and start Fluent Bit
-  become: true
-  systemd:
-    name: fluent-bit
-    enabled: true
-    state: started
-    daemon_reload: true
