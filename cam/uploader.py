@@ -311,6 +311,11 @@ class Uploader:
         """Main uploader loop."""
         log_info("uploader", "Uploader process started")
 
+        # Clear pause flag on startup (shutdown creates this, but we want fresh start)
+        if self.pause_file.exists():
+            self.pause_file.unlink()
+            log_info("uploader", "Cleared stale pause flag from previous shutdown")
+
         cleanup_interval = 300  # Cleanup every 5 minutes
         last_cleanup = 0
 
