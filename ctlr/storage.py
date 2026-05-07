@@ -835,6 +835,9 @@ def validate_session(uuid: str) -> dict:
         "synced": bool(session.get("watch_synced", 0)),
     }
 
+    # Export status
+    result["exported"] = bool(session.get("exported", 0))
+
     # Summary stats
     result["summary"] = {
         "total_expected": total_expected,
