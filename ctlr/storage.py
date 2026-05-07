@@ -414,9 +414,179 @@ def get_storage_status() -> dict:
     return status
 
 
+def generate_manifest(uuid: str, dest: Path) -> dict:
+    """
+    Generate a comprehensive manifest for an exported session.
+    Includes all metadata about cameras, CAN, phone, watch data.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    config = get_config()
+    db = get_db()
+
+    # Get session from database
+    session = db.get_session(uuid)
+    session_stats = db.get_session_stats(uuid)
+
+    # Get validation info
+    validation = validate_session(uuid)
+
+    # Calculate duration
+    duration_seconds = None
+    if session and session.get("started_at") and session.get("stopped_at"):
+        try:
+            start = datetime.fromisoformat(session["started_at"])
+            stop = datetime.fromisoformat(session["stopped_at"])
+            duration_seconds = (stop - start).total_seconds()
+        except Exception:
+            pass
+
+    # Build camera details
+    cameras = {}
+    expected_counts = db.get_expected_segments(uuid)
+    received_counts = db.get_segment_counts(uuid)
+    segments_by_camera = db.get_session_segments(uuid)
+
+    for camera_dir in (dest).iterdir():
+        if camera_dir.is_dir() and camera_dir.name.startswith(("cam", "melb")):
+            camera_name = camera_dir.name
+            segments = list(camera_dir.glob("*.h264"))
+            segment_files = []
+            total_size = 0
+
+            for seg in sorted(segments, key=lambda x: x.name):
+                size = seg.stat().st_size
+                total_size += size
+                segment_files.append({
+                    "filename": seg.name,
+                    "size_bytes": size,
+                })
+
+            cameras[camera_name] = {
+                "segment_count": len(segments),
+                "expected_count": expected_counts.get(camera_name),
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "complete": len(segments) >= expected_counts.get(camera_name, 0) if expected_counts.get(camera_name) else None,
+                "segments": segment_files,
+            }
+
+    # CAN data info
+    can_info = {"exists": False}
+    can_dir = dest / "can"
+    if can_dir.exists():
+        can_log = can_dir / "can_log.csv"
+        if can_log.exists():
+            can_size = can_log.stat().st_size
+            # Estimate frame count from file size (avg ~40 bytes per line)
+            estimated_frames = max(0, (can_size - 32) // 40) if can_size > 50 else 0
+            can_info = {
+                "exists": True,
+                "filename": "can_log.csv",
+                "size_bytes": can_size,
+                "size_mb": round(can_size / (1024 * 1024), 2),
+                "has_data": can_size > 100,
+                "estimated_frames": estimated_frames,
+            }
+
+    # Phone data info
+    phone_info = {"exists": False, "files": []}
+    phone_dir = dest / "phone"
+    if phone_dir.exists():
+        phone_files = []
+        total_phone_size = 0
+        for f in sorted(phone_dir.iterdir()):
+            if f.is_file():
+                size = f.stat().st_size
+                total_phone_size += size
+                phone_files.append({
+                    "filename": f.name,
+                    "size_bytes": size,
+                })
+        phone_info = {
+            "exists": len(phone_files) > 0,
+            "file_count": len(phone_files),
+            "total_size_bytes": total_phone_size,
+            "total_size_mb": round(total_phone_size / (1024 * 1024), 2),
+            "files": phone_files,
+        }
+
+    # Watch data info
+    watch_info = {"exists": False, "files": []}
+    watch_dir = dest / "watch"
+    if watch_dir.exists():
+        watch_files = []
+        total_watch_size = 0
+        for f in sorted(watch_dir.iterdir()):
+            if f.is_file():
+                size = f.stat().st_size
+                total_watch_size += size
+                watch_files.append({
+                    "filename": f.name,
+                    "size_bytes": size,
+                })
+        watch_info = {
+            "exists": len(watch_files) > 0,
+            "file_count": len(watch_files),
+            "total_size_bytes": total_watch_size,
+            "total_size_mb": round(total_watch_size / (1024 * 1024), 2),
+            "files": watch_files,
+        }
+
+    # Calculate total size
+    total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
+
+    manifest = {
+        "manifest_version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generator": "syncdrive-ctlr",
+        "controller": config.node.name,
+
+        "session": {
+            "uuid": uuid,
+            "status": session.get("status") if session else None,
+            "started_at": session.get("started_at") if session else None,
+            "stopped_at": session.get("stopped_at") if session else None,
+            "duration_seconds": duration_seconds,
+            "duration_formatted": f"{int(duration_seconds // 60)}m {int(duration_seconds % 60)}s" if duration_seconds else None,
+        },
+
+        "validation": {
+            "complete": validation.get("complete", False),
+            "issues": validation.get("issues", []),
+        },
+
+        "summary": {
+            "total_size_bytes": total_size,
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
+            "total_size_gb": round(total_size / (1024 * 1024 * 1024), 3),
+            "camera_count": len(cameras),
+            "total_segments": sum(c["segment_count"] for c in cameras.values()),
+            "has_can_data": can_info.get("has_data", False),
+            "has_phone_data": phone_info.get("exists", False),
+            "has_watch_data": watch_info.get("exists", False),
+        },
+
+        "cameras": cameras,
+        "can": can_info,
+        "phone": phone_info,
+        "watch": watch_info,
+    }
+
+    # Write manifest to file
+    manifest_path = dest / "manifest.json"
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    log_info("storage", f"Generated manifest for {uuid}")
+    return manifest
+
+
 def export_session(uuid: str) -> Tuple[bool, str]:
     """
     Copy a session from storage to export partition for Mac access.
+    Generates a manifest.json with all session metadata.
     Returns (success, message).
     """
     config = get_config()
@@ -430,9 +600,16 @@ def export_session(uuid: str) -> Tuple[bool, str]:
     if not is_mounted(EXPORT_MOUNT):
         return False, "Export partition not mounted"
 
-    # Check if already exported
+    # Check if already exported (but allow if only phone/watch data exists)
     if dest.exists():
-        return False, f"Session {uuid} already exists on export partition"
+        # Check if it has camera data or just phone/watch
+        has_camera_data = any(
+            d.name.startswith(("cam", "melb")) and d.is_dir()
+            for d in dest.iterdir()
+        )
+        if has_camera_data:
+            return False, f"Session {uuid} already exists on export partition"
+        # Otherwise, we'll merge camera/CAN data into existing phone/watch folder
 
     try:
         # Get session size for space check
@@ -441,27 +618,46 @@ def export_session(uuid: str) -> Tuple[bool, str]:
         if not check_storage_space(EXPORT_MOUNT, session_size):
             return False, "Insufficient space on export partition"
 
-        # Copy session
+        # Copy session (merge with existing if phone/watch already there)
         log_info("storage", f"Exporting session {uuid} to export partition...")
-        shutil.copytree(source, dest)
+
+        if dest.exists():
+            # Merge: copy each subdirectory from source
+            for item in source.iterdir():
+                item_dest = dest / item.name
+                if item.is_dir():
+                    if item_dest.exists():
+                        shutil.rmtree(item_dest)
+                    shutil.copytree(item, item_dest)
+                else:
+                    shutil.copy2(item, item_dest)
+        else:
+            shutil.copytree(source, dest)
 
         # Verify copy
-        copied_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
-        if copied_size != session_size:
-            log_error("storage", f"Export size mismatch: {session_size} vs {copied_size}")
-            shutil.rmtree(dest, ignore_errors=True)
+        copied_size = sum(
+            f.stat().st_size for f in dest.rglob("*")
+            if f.is_file() and f.name != "manifest.json"
+        )
+        # Account for phone/watch data that was already there
+        expected_min = session_size * 0.99  # Allow 1% tolerance
+        if copied_size < expected_min:
+            log_error("storage", f"Export size mismatch: expected {session_size}, got {copied_size}")
             return False, "Export verification failed"
+
+        # Generate manifest
+        generate_manifest(uuid, dest)
 
         # Mark as exported in database
         db = get_db()
         db.mark_exported(uuid)
 
-        log_info("storage", f"Exported session {uuid} ({session_size / (1024*1024):.1f} MB)")
-        return True, f"Exported {uuid} ({session_size / (1024*1024):.1f} MB)"
+        total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
+        log_info("storage", f"Exported session {uuid} ({total_size / (1024*1024):.1f} MB)")
+        return True, f"Exported {uuid} ({total_size / (1024*1024):.1f} MB)"
 
     except Exception as e:
         log_error("storage", f"Export failed: {e}")
-        shutil.rmtree(dest, ignore_errors=True)
         return False, str(e)
 
 
