@@ -419,7 +419,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\"} | json | component=\"ctlr.events\"",
+            "expr": "{job=\"syncdrive\", component=\"ctlr.events\"}",
             "legendFormat": "",
             "refId": "A"
           }
@@ -479,7 +479,7 @@
         ],
         "targets": [
           {
-            "expr": "{job=\"syncdrive\"} | json | component=\"ctlr.events\" | event=\"preflight\"",
+            "expr": "{job=\"syncdrive\", component=\"ctlr.events\"} | json | event=\"preflight\"",
             "legendFormat": "",
             "refId": "A"
           }
@@ -539,7 +539,7 @@
         ],
         "targets": [
           {
-            "expr": "{job=\"syncdrive\"} | json | component=\"ctlr.events\" | event=~\"record_start|record_stop\"",
+            "expr": "{job=\"syncdrive\", component=\"ctlr.events\"} | json | event=~\"record_start|record_stop\"",
             "legendFormat": "",
             "refId": "A"
           }

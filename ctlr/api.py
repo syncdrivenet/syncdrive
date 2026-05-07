@@ -222,7 +222,7 @@ async def stop_recording():
     """Stop recording on all cameras."""
     orchestrator = get_orchestrator()
     state = get_state()
-    current_uuid = state.uuid
+    current_uuid = state.session_uuid
 
     result = await orchestrator.stop_recording()
 
