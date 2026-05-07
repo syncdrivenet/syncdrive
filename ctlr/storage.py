@@ -500,6 +500,149 @@ def delete_exported_session(uuid: str) -> Tuple[bool, str]:
         return False, str(e)
 
 
+def validate_session(uuid: str) -> dict:
+    """
+    Validate session completeness for export.
+
+    Checks:
+    - All expected segments received from all cameras
+    - CAN bus log exists with data
+    - Phone/watch data sync status
+
+    Returns validation result with details.
+    """
+    config = get_config()
+    db = get_db()
+
+    result = {
+        "uuid": uuid,
+        "valid": True,
+        "complete": True,
+        "issues": [],
+        "cameras": {},
+        "can": {},
+        "phone": {},
+        "watch": {},
+    }
+
+    # Check session exists
+    session = db.get_session(uuid)
+    if not session:
+        return {
+            "uuid": uuid,
+            "valid": False,
+            "complete": False,
+            "error": "Session not found",
+            "issues": ["Session does not exist in database"],
+        }
+
+    # Check if recording is still in progress
+    if session.get("status") == "recording":
+        result["issues"].append("Recording still in progress")
+        result["complete"] = False
+
+    # Get expected and received segment counts
+    expected_counts = db.get_expected_segments(uuid)
+    received_counts = db.get_segment_counts(uuid)
+
+    total_expected = 0
+    total_received = 0
+    missing_segments = []
+
+    for camera, expected in expected_counts.items():
+        received = received_counts.get(camera, 0)
+        total_expected += expected
+        total_received += received
+
+        camera_info = {
+            "expected": expected,
+            "received": received,
+            "complete": received >= expected,
+            "missing": max(0, expected - received),
+        }
+        result["cameras"][camera] = camera_info
+
+        if received < expected:
+            missing = expected - received
+            missing_segments.append(f"{camera}: {missing} missing")
+            result["complete"] = False
+
+    # Check for cameras with segments but no expected count (recording not properly stopped)
+    for camera, received in received_counts.items():
+        if camera not in expected_counts and received > 0:
+            result["cameras"][camera] = {
+                "expected": None,
+                "received": received,
+                "complete": None,  # Unknown - camera didn't report expected count
+                "warning": "Camera did not report expected segment count",
+            }
+            result["issues"].append(f"{camera}: expected segment count not reported")
+
+    if missing_segments:
+        result["issues"].append(f"Missing segments: {', '.join(missing_segments)}")
+
+    # Check CAN bus data
+    can_dir = config.storage.recordings_path / uuid / "can"
+    can_log = can_dir / "can_log.csv"
+
+    if can_log.exists():
+        can_size = can_log.stat().st_size
+        # Check file has more than just header (header is ~30 bytes)
+        has_data = can_size > 50
+
+        # Count frames (lines minus header)
+        try:
+            with open(can_log, "r") as f:
+                frame_count = sum(1 for _ in f) - 1  # Subtract header
+                frame_count = max(0, frame_count)
+        except Exception:
+            frame_count = 0
+
+        result["can"] = {
+            "exists": True,
+            "has_data": has_data,
+            "size_bytes": can_size,
+            "frames": frame_count,
+        }
+
+        if not has_data:
+            result["issues"].append("CAN log exists but contains no data")
+            result["complete"] = False
+    else:
+        result["can"] = {
+            "exists": False,
+            "has_data": False,
+        }
+        result["issues"].append("CAN log missing")
+        result["complete"] = False
+
+    # Check phone data
+    phone_synced = session.get("phone_synced", 0)
+    result["phone"] = {
+        "synced": bool(phone_synced),
+    }
+
+    # Check watch data
+    watch_synced = session.get("watch_synced", 0)
+    result["watch"] = {
+        "synced": bool(watch_synced),
+    }
+
+    # Summary stats
+    result["summary"] = {
+        "total_expected": total_expected,
+        "total_received": total_received,
+        "progress_percent": round((total_received / total_expected) * 100, 1) if total_expected > 0 else 100,
+        "cameras_count": len(expected_counts) if expected_counts else len(received_counts),
+    }
+
+    # valid = no critical errors (session exists, etc.)
+    # complete = all data received (segments + CAN)
+    result["valid"] = True
+
+    return result
+
+
 async def receive_phone_data(
     uuid: str,
     filename: str,

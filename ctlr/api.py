@@ -12,7 +12,7 @@ from state import get_state
 from storage import (
     receive_segment, get_session_info, list_sessions, get_storage_status,
     get_full_storage_status, mount_storage, unmount_storage, is_mounted, STORAGE_MOUNT,
-    export_session, list_exported_sessions, delete_exported_session
+    export_session, list_exported_sessions, delete_exported_session, validate_session
 )
 from orchestrator import get_orchestrator
 from logger import log_info, log_error, log_ios, log_event
@@ -828,6 +828,29 @@ async def session_segments(uuid: str):
             "counts": db.get_segment_counts(uuid),
             "total": db.get_total_segments(uuid),
         },
+    }
+
+
+@app.get("/api/sessions/{uuid}/validate")
+async def validate_session_endpoint(uuid: str):
+    """
+    Validate session completeness before export.
+
+    Checks:
+    - All expected segments received from all cameras
+    - CAN bus log exists with data
+    - Phone/watch data sync status
+
+    Returns validation result for iOS app to display.
+    """
+    result = validate_session(uuid)
+
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return {
+        "success": True,
+        "data": result,
     }
 
 
