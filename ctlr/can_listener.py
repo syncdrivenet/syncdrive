@@ -197,9 +197,9 @@ class CANListener:
                         length = int(parts[2])
                         data = parts[3]
 
-                        # Check NTP sync - timestamp should be within 2s of current time
+                        # Check NTP sync - timestamp should be within 5s of current time
                         time_diff = abs(timestamp - time.time())
-                        self.state.ntp_synced = time_diff < 2
+                        self.state.ntp_synced = time_diff < 5
 
                         if self.state.recording:
                             self._write_frame(timestamp, can_id, length, data)
