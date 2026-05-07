@@ -554,9 +554,33 @@
       },
       {
         "id": 21,
-        "title": "API Logs",
+        "title": "Controller Logs",
         "type": "logs",
-        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 37},
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 37},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\", node=\"melb-01-ctlr\"} !~ \"timedated|Time & Date|systemd|apt-daily|ansible\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 26,
+        "title": "Camera Logs",
+        "type": "logs",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
         "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
         "options": {
           "showTime": true,
@@ -570,7 +594,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\", node=\"melb-01-ctlr\"} !~ \"timedated|Time & Date\"",
+            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"} !~ \"timedated|Time & Date|systemd\"",
             "legendFormat": "",
             "refId": "A"
           }
