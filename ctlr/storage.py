@@ -587,22 +587,14 @@ def validate_session(uuid: str) -> dict:
 
     if can_log.exists():
         can_size = can_log.stat().st_size
-        # Check file has more than just header (header is ~30 bytes)
-        has_data = can_size > 50
-
-        # Count frames (lines minus header)
-        try:
-            with open(can_log, "r") as f:
-                frame_count = sum(1 for _ in f) - 1  # Subtract header
-                frame_count = max(0, frame_count)
-        except Exception:
-            frame_count = 0
+        # Header is ~32 bytes ("timestamp,can_id,length,data\n")
+        # If file > 100 bytes, it definitely has data
+        has_data = can_size > 100
 
         result["can"] = {
             "exists": True,
             "has_data": has_data,
             "size_bytes": can_size,
-            "frames": frame_count,
         }
 
         if not has_data:
