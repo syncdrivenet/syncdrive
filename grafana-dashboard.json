@@ -570,7 +570,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\", node=\"melb-01-ctlr\"}",
+            "expr": "{job=\"syncdrive\", node=\"melb-01-ctlr\"} !~ \"timedated|Time & Date\"",
             "legendFormat": "",
             "refId": "A"
           }

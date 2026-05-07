@@ -623,6 +623,7 @@ def export_session(uuid: str) -> Tuple[bool, str]:
     """
     Copy a session from storage to export partition for Mac access.
     Uses human-readable folder naming: YYYY-MM-DD_HH-MM_UUID
+    All data (cameras, CAN, phone, watch) is in storage, copied together.
     Generates a manifest.json with all session metadata.
     Returns (success, message).
     """
@@ -639,22 +640,9 @@ def export_session(uuid: str) -> Tuple[bool, str]:
         return False, "Export partition not mounted"
 
     # Check for existing export (could be old UUID format or new date format)
-    existing_dest = None
     for existing in EXPORT_MOUNT.iterdir():
         if existing.is_dir() and (existing.name == uuid or existing.name.endswith(f"_{uuid[:8]}")):
-            existing_dest = existing
-            break
-
-    if existing_dest:
-        # Check if it has camera data or just phone/watch
-        has_camera_data = any(
-            d.name.startswith(("cam", "melb")) and d.is_dir()
-            for d in existing_dest.iterdir()
-        )
-        if has_camera_data:
             return False, f"Session {uuid} already exists on export partition"
-        # Merge into existing folder (phone/watch data already there)
-        dest = existing_dest
 
     try:
         # Get session size for space check
@@ -663,28 +651,18 @@ def export_session(uuid: str) -> Tuple[bool, str]:
         if not check_storage_space(EXPORT_MOUNT, session_size):
             return False, "Insufficient space on export partition"
 
-        # Copy session (merge with existing if phone/watch already there)
+        # Copy entire session folder
         log_info("storage", f"Exporting session {uuid} to export partition...")
 
         if dest.exists():
-            # Merge: copy each subdirectory from source
-            for item in source.iterdir():
-                item_dest = dest / item.name
-                if item.is_dir():
-                    if item_dest.exists():
-                        shutil.rmtree(item_dest)
-                    shutil.copytree(item, item_dest)
-                else:
-                    shutil.copy2(item, item_dest)
-        else:
-            shutil.copytree(source, dest)
+            shutil.rmtree(dest)  # Clean existing if somehow present
+        shutil.copytree(source, dest)
 
         # Verify copy
         copied_size = sum(
             f.stat().st_size for f in dest.rglob("*")
             if f.is_file() and f.name != "manifest.json"
         )
-        # Account for phone/watch data that was already there
         expected_min = session_size * 0.99  # Allow 1% tolerance
         if copied_size < expected_min:
             log_error("storage", f"Export size mismatch: expected {session_size}, got {copied_size}")
@@ -871,17 +849,14 @@ async def receive_phone_data(
     """
     Receive phone data file (motion, location, etc.) for a session.
 
-    Writes directly to export partition (exFAT) since phone data
-    is only uploaded after user presses "Process" in iOS app.
+    Stores in session directory on storage partition alongside camera data.
+    Data is moved to export partition when export_session() is called.
     """
+    config = get_config()
     db = get_db()
 
-    if not is_mounted(EXPORT_MOUNT):
-        log_error("storage", "Export partition not mounted for phone data")
-        return False
-
-    # Store in export_dir/uuid/phone/
-    data_dir = EXPORT_MOUNT / uuid / "phone"
+    # Store in storage/sessions/uuid/phone/
+    data_dir = config.storage.recordings_path / uuid / "phone"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     temp_path = data_dir / f"{filename}.tmp"
@@ -918,17 +893,14 @@ async def receive_watch_data(
     """
     Receive watch data file (heart rate, motion, etc.) for a session.
 
-    Writes directly to export partition (exFAT) since watch data
-    is only uploaded after user presses "Process" in iOS app.
+    Stores in session directory on storage partition alongside camera data.
+    Data is moved to export partition when export_session() is called.
     """
+    config = get_config()
     db = get_db()
 
-    if not is_mounted(EXPORT_MOUNT):
-        log_error("storage", "Export partition not mounted for watch data")
-        return False
-
-    # Store in export_dir/uuid/watch/
-    data_dir = EXPORT_MOUNT / uuid / "watch"
+    # Store in storage/sessions/uuid/watch/
+    data_dir = config.storage.recordings_path / uuid / "watch"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     temp_path = data_dir / f"{filename}.tmp"
