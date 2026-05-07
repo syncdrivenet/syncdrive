@@ -740,6 +740,8 @@ def validate_session(uuid: str) -> dict:
         "issues": [],
         "cameras": {},
         "can": {},
+        "phone": {},
+        "watch": {},
     }
 
     # Check session exists
@@ -824,6 +826,14 @@ def validate_session(uuid: str) -> dict:
         }
         result["issues"].append("CAN log missing")
         result["complete"] = False
+
+    # Phone/watch sync status (from database flags set by PUT endpoints)
+    result["phone"] = {
+        "synced": bool(session.get("phone_synced", 0)),
+    }
+    result["watch"] = {
+        "synced": bool(session.get("watch_synced", 0)),
+    }
 
     # Summary stats
     result["summary"] = {
