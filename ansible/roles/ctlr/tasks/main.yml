@@ -14,8 +14,19 @@
       - git
       - exfat-fuse
       - exfatprogs
+      - fluent-bit
     state: present
     update_cache: true
+
+- name: Remove unused mount directories
+  become: true
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /mnt/sdboot
+    - /mnt/sdcard
+    - /mnt/sdroot
 
 - name: Create data directories
   become: true
@@ -89,6 +100,24 @@
   become: true
   systemd:
     name: syncdrive-ctlr
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Fluent Bit for log shipping to Loki
+- name: Deploy Fluent Bit config
+  become: true
+  copy:
+    src: "{{ syncdrive_path }}/ctlr/systemd/fluent-bit-ctlr.conf"
+    dest: /etc/fluent-bit/fluent-bit.conf
+    remote_src: yes
+    mode: '0644'
+  notify: Restart fluent-bit
+
+- name: Enable and start Fluent Bit
+  become: true
+  systemd:
+    name: fluent-bit
     enabled: true
     state: started
     daemon_reload: true

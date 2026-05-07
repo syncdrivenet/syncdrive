@@ -9,3 +9,9 @@
     - syncdrive-recorder
     - syncdrive-uploader
     - syncdrive-cam-api
+
+- name: Restart fluent-bit
+  become: true
+  systemd:
+    name: fluent-bit
+    state: restarted

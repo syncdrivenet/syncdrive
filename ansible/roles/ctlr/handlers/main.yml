@@ -5,3 +5,9 @@
     name: syncdrive-ctlr
     state: restarted
     daemon_reload: true
+
+- name: Restart fluent-bit
+  become: true
+  systemd:
+    name: fluent-bit
+    state: restarted
