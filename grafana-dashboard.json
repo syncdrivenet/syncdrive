@@ -558,30 +558,7 @@
         "type": "logs",
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 37},
         "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
-        "options": {
-          "showTime": true,
-          "showLabels": false,
-          "showCommonLabels": false,
-          "wrapLogMessage": true,
-          "prettifyLogMessage": false,
-          "enableLogDetails": true,
-          "sortOrder": "Descending",
-          "dedupStrategy": "none"
-        },
-        "targets": [
-          {
-            "expr": "{job=\"syncdrive\", node=\"melb-01-ctlr\"} !~ \"timedated|Time & Date|systemd|apt-daily|ansible\"",
-            "legendFormat": "",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 26,
-        "title": "Camera Logs",
-        "type": "logs",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
-        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "Orchestrator, API, storage, websocket logs from controller",
         "options": {
           "showTime": true,
           "showLabels": true,
@@ -594,7 +571,157 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"} !~ \"timedated|Time & Date|systemd\"",
+            "expr": "{job=\"syncdrive\", component=~\"ctlr\\..*\"} !~ \"timedated|Time & Date|systemd|apt-daily|ansible\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 26,
+        "title": "Camera API Logs",
+        "type": "logs",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "Camera API and recorder logs from Pi Zeros",
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\", component=~\"cam\\..*\"}",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 27,
+        "title": "Camera System Logs",
+        "type": "logs",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 45},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "System logs from Pi Zero cameras (syslog)",
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"} !~ \"timedated|Time & Date|systemd|apt-daily|ansible\" !~ \"cam\\.api|cam\\.recorder\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 28,
+        "title": "iOS App Logs",
+        "type": "logs",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 45},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "Logs from iOS SyncDrive app",
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\", component=~\"ios\\..*\"}",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 29,
+        "title": "CAN Bus Logs",
+        "type": "logs",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 53},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "CAN bus listener connection and recording logs",
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\", component=\"ctlr.can\"}",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 30,
+        "title": "Error Logs",
+        "type": "logs",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 53},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "All error and warning level logs",
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\"} |~ \"ERROR|WARNING|error|warning|Error|Warning\"",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 31,
+        "title": "All Logs",
+        "type": "logs",
+        "gridPos": {"h": 10, "w": 24, "x": 0, "y": 59},
+        "datasource": {"type": "loki", "uid": "bfkz58swdpnggd"},
+        "description": "All SyncDrive logs combined",
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"syncdrive\"} !~ \"timedated|Time & Date|systemd|apt-daily|ansible\"",
             "legendFormat": "",
             "refId": "A"
           }
