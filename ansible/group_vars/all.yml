@@ -34,3 +34,8 @@ ctlr_config_path: /data/ctlr
 ctlr_storage_path: /mnt/storage/sessions
 ctlr_export_path: /mnt/export
 ctlr_logs_path: /data/logs/ctlr
+
+# Chrony NTP settings
+# Controller serves time to cameras, cameras sync to controller
+chrony_ntp_servers:
+  - pool.ntp.org

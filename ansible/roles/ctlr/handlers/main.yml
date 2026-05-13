@@ -11,3 +11,9 @@
   systemd:
     name: fluent-bit
     state: restarted
+
+- name: Restart chrony
+  become: true
+  systemd:
+    name: chrony
+    state: restarted

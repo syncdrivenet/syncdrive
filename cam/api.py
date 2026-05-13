@@ -16,61 +16,47 @@ from config import get_config
 from logger import log_info
 
 # NTP sync cache (avoid spawning subprocesses on every request)
-_ntp_cache = {"synced": False, "checked_at": 0}
-NTP_CACHE_TTL = 30  # seconds
+_ntp_cache = {"synced": False, "checked_at": 0.0}
+NTP_CACHE_TTL = 5  # seconds - short for boot responsiveness
 
 
 def _check_ntp_sync() -> bool:
     """
-    Check if system clock is properly NTP synchronized.
-    Works with both chrony and systemd-timesyncd.
+    Check if system clock is NTP synchronized via chrony.
     Results are cached for NTP_CACHE_TTL seconds.
     """
     global _ntp_cache
 
-    # Return cached result if fresh
-    if time.time() - _ntp_cache["checked_at"] < NTP_CACHE_TTL:
+    now = time.monotonic()
+    if now - _ntp_cache["checked_at"] < NTP_CACHE_TTL:
         return _ntp_cache["synced"]
 
     try:
-        # Check if NTP is synchronized via timedatectl
         result = subprocess.run(
-            ["/usr/bin/timedatectl", "show", "--property=NTPSynchronized", "--value"],
+            ["/usr/bin/chronyc", "tracking"],
             capture_output=True,
             text=True,
             timeout=2
         )
-        if result.stdout.strip().lower() != "yes":
-            _ntp_cache = {"synced": False, "checked_at": time.time()}
+        if result.returncode != 0:
+            _ntp_cache = {"synced": False, "checked_at": now}
             return False
 
-        # Try chronyc for stratum check (if chrony is installed)
-        # If chronyc not available, trust timedatectl (systemd-timesyncd)
-        try:
-            result = subprocess.run(
-                ["/usr/bin/chronyc", "tracking"],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            if result.returncode == 0:
-                # chrony is available, check stratum
-                for line in result.stdout.splitlines():
-                    if line.startswith("Stratum"):
-                        stratum = int(line.split(":")[1].strip())
-                        if stratum > 10:
-                            _ntp_cache = {"synced": False, "checked_at": time.time()}
-                            return False  # Synced to local fallback, not real NTP
-                        break
-        except FileNotFoundError:
-            # chronyc not installed, using systemd-timesyncd - that's OK
-            pass
+        # Check leap status and stratum
+        synced = False
+        for line in result.stdout.splitlines():
+            if line.startswith("Leap status") and "Normal" in line:
+                synced = True
+            elif line.startswith("Stratum"):
+                stratum = int(line.split(":")[1].strip())
+                if stratum == 0 or stratum > 10:
+                    synced = False  # Not synced or local fallback
+                    break
 
-        # Either chrony says OK, or using timesyncd (no stratum check available)
-        _ntp_cache = {"synced": True, "checked_at": time.time()}
-        return True
+        _ntp_cache = {"synced": synced, "checked_at": now}
+        return synced
     except Exception:
-        _ntp_cache = {"synced": False, "checked_at": time.time()}
+        _ntp_cache = {"synced": False, "checked_at": now}
         return False
 
 

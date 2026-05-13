@@ -596,7 +596,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\", component=~\"cam\\..*\"}",
+            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"}",
             "legendFormat": "",
             "refId": "A"
           }
@@ -646,7 +646,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\", component=~\"ios\\..*\"}",
+            "expr": "{job=\"syncdrive\", node=\"iphone\"}",
             "legendFormat": "",
             "refId": "A"
           }

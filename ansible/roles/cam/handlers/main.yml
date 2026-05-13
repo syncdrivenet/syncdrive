@@ -9,3 +9,9 @@
     - syncdrive-recorder
     - syncdrive-uploader
     - syncdrive-cam-api
+
+- name: Restart chrony
+  become: true
+  systemd:
+    name: chrony
+    state: restarted

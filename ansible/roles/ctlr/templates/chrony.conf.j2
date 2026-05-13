@@ -1,0 +1,20 @@
+# Chrony NTP configuration for SyncDrive controller
+# This node syncs to internet and serves time to cameras
+
+# Sync to internet NTP pools
+{% for server in chrony_ntp_servers %}
+pool {{ server }} iburst
+{% endfor %}
+
+# Serve time to local network (cameras)
+allow 192.168.0.0/16
+allow 10.0.0.0/8
+
+# Record rate at which system clock gains/losses time
+driftfile /var/lib/chrony/chrony.drift
+
+# Save NTS keys and cookies
+ntsdumpdir /var/lib/chrony
+
+# Log files location
+logdir /var/log/chrony

@@ -1,0 +1,11 @@
+# Chrony NTP configuration for SyncDrive camera
+# This node syncs to controller only
+
+# Sync to controller
+server {{ controller_host }} iburst
+
+# Record rate at which system clock gains/losses time
+driftfile /var/lib/chrony/chrony.drift
+
+# Log files location
+logdir /var/log/chrony

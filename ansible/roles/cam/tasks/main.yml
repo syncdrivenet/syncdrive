@@ -9,8 +9,24 @@
       - python3-picamera2
       - python3-venv
       - git
+      - chrony
     state: present
     update_cache: true
+
+- name: Deploy chrony config (NTP client syncs to controller)
+  become: true
+  template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    mode: '0644'
+  notify: Restart chrony
+
+- name: Enable and start chrony
+  become: true
+  systemd:
+    name: chrony
+    enabled: true
+    state: started
 
 - name: Create data directories
   become: true
