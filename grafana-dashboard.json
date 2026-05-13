@@ -596,7 +596,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"}",
+            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"} |~ \"cam\\\\.(api|recorder|uploader)\"",
             "legendFormat": "",
             "refId": "A"
           }
@@ -621,7 +621,7 @@
         },
         "targets": [
           {
-            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"} !~ \"timedated|Time & Date|systemd|apt-daily|ansible\" !~ \"cam\\.api|cam\\.recorder\"",
+            "expr": "{job=\"syncdrive\", node=~\"melb-01-cam.*\"} !~ \"cam\\\\.(api|recorder|uploader)\" !~ \"timedated|apt-daily|ansible|tailscaled\"",
             "legendFormat": "",
             "refId": "A"
           }
