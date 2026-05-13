@@ -1,0 +1,3 @@
+# cam-02 specific settings - camera mounted right-side up
+camera_flip_horizontal: false
+camera_flip_vertical: false

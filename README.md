@@ -210,6 +210,31 @@ After enabling:
 - `/data` is read-write (recordings persist)
 - Safe to power-pull during recording
 
+## Time Synchronization (NTP)
+
+Camera nodes use chrony to sync time from the controller. This is critical for synchronized multi-camera recording.
+
+**Configuration** (`/etc/chrony/chrony.conf`):
+```
+server 192.168.8.145 iburst    # Sync to controller
+makestep 1 -1                   # Step clock if >1s off (always)
+```
+
+**Why `makestep 1 -1`:**
+- Pi Zero has no RTC (real-time clock hardware)
+- On boot, clock may be minutes/hours behind
+- `makestep 1 -1` = immediately jump to correct time if >1 second off
+- Without this, chrony "slews" (gradually adjusts) which can take hours/days
+
+**Manual time sync:**
+```bash
+# Force immediate time step
+sudo chronyc makestep
+
+# Check sync status
+chronyc tracking
+```
+
 ## License
 
 MIT
