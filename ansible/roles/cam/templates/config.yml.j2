@@ -12,6 +12,8 @@ recording:
   bitrate: {{ recording.bitrate }}
   segment_duration: {{ recording.segment_duration }}
   recordings_dir: {{ cam_recordings_path }}
+  flip_horizontal: {{ camera_flip_horizontal | default(false) | lower }}
+  flip_vertical: {{ camera_flip_vertical | default(false) | lower }}
 
 sync:
   chunk_size: {{ sync.chunk_size }}

@@ -17,6 +17,12 @@ recording:
   bitrate: 4000000
   segment_duration: 120  # 2 minutes
 
+# Camera orientation (ISP hardware transform, zero CPU overhead)
+# Set both to true for 180° rotation (upside-down mount)
+# Override per-host in host_vars/<hostname>.yml
+camera_flip_horizontal: true
+camera_flip_vertical: true
+
 # Sync settings
 sync:
   chunk_size: 65536

@@ -34,6 +34,8 @@ class RecordingConfig:
     bitrate: int = 4000000  # 4Mbps - good for 1080p30
     segment_duration: int = 120  # seconds
     recordings_dir: str = "/data/recordings"
+    flip_horizontal: bool = False  # Mirror image horizontally
+    flip_vertical: bool = False    # Flip image vertically (hflip+vflip = 180° rotation)
 
     @property
     def recordings_path(self) -> Path:

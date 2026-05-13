@@ -152,7 +152,10 @@ class Recorder:
                     "format": "RGB888",
                 },
                 controls={"FrameRate": self.config.recording.fps},
-                transform=Transform(hflip=True, vflip=True),  # 180° rotation
+                transform=Transform(
+                    hflip=self.config.recording.flip_horizontal,
+                    vflip=self.config.recording.flip_vertical,
+                ),
             )
             self.camera.configure(video_config)
             self.encoder = H264Encoder(bitrate=self.config.recording.bitrate)
