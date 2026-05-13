@@ -1,15 +1,7 @@
 # Chrony NTP configuration for SyncDrive camera
-# This node syncs to controller only
+# Sync directly to internet NTP with aggressive polling
 
-# Sync to controller
-server {{ controller_host }} iburst
-
-# Step clock immediately if offset > 1 second (always, unlimited)
-# Critical for Pi Zero which has no RTC - will always jump if >1s off
+pool pool.ntp.org iburst minpoll 4 maxpoll 6
 makestep 1 -1
-
-# Record rate at which system clock gains/losses time
 driftfile /var/lib/chrony/chrony.drift
-
-# Log files location
 logdir /var/log/chrony

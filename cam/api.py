@@ -23,6 +23,7 @@ NTP_CACHE_TTL = 5  # seconds - short for boot responsiveness
 def _check_ntp_sync() -> bool:
     """
     Check if system clock is NTP synchronized via chrony.
+    Verifies actual time offset is < 1 second (not just "tracking").
     Results are cached for NTP_CACHE_TTL seconds.
     """
     global _ntp_cache
@@ -42,17 +43,25 @@ def _check_ntp_sync() -> bool:
             _ntp_cache = {"synced": False, "checked_at": now}
             return False
 
-        # Check leap status and stratum
-        synced = False
-        for line in result.stdout.splitlines():
-            if line.startswith("Leap status") and "Normal" in line:
-                synced = True
-            elif line.startswith("Stratum"):
-                stratum = int(line.split(":")[1].strip())
-                if stratum == 0 or stratum > 10:
-                    synced = False  # Not synced or local fallback
-                    break
+        # Check stratum, leap status, AND actual offset
+        stratum_ok = False
+        leap_ok = False
+        offset_ok = False
 
+        for line in result.stdout.splitlines():
+            if line.startswith("Stratum"):
+                stratum = int(line.split(":")[1].strip())
+                stratum_ok = 1 <= stratum <= 10
+            elif line.startswith("Leap status") and "Normal" in line:
+                leap_ok = True
+            elif line.startswith("System time"):
+                # Parse "0.000046299 seconds slow of NTP time"
+                parts = line.split(":")[1].strip().split()
+                if len(parts) >= 2:
+                    offset = abs(float(parts[0]))
+                    offset_ok = offset < 1.0  # Must be within 1 second
+
+        synced = stratum_ok and leap_ok and offset_ok
         _ntp_cache = {"synced": synced, "checked_at": now}
         return synced
     except Exception:
