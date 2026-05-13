@@ -9,6 +9,13 @@ pool {{ server }} iburst
 # Serve time to local network (cameras)
 allow 192.168.0.0/16
 allow 10.0.0.0/8
+allow 100.64.0.0/10
+
+# Step clock if >1s off at startup
+makestep 1 3
+
+# Continue serving time if internet is down (stratum 10 = low priority fallback)
+local stratum 10
 
 # Record rate at which system clock gains/losses time
 driftfile /var/lib/chrony/chrony.drift
