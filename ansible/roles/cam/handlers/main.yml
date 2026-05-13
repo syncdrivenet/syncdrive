@@ -15,3 +15,9 @@
   systemd:
     name: chrony
     state: restarted
+
+- name: Restart rsyslog
+  become: true
+  systemd:
+    name: rsyslog
+    state: restarted

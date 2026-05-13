@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, SysLogHandler
 
 from config import get_config
 
@@ -92,6 +92,15 @@ def setup_logging() -> logging.Logger:
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
     logger.addHandler(stdout_handler)
+
+    # Syslog handler for forwarding to controller via rsyslog
+    try:
+        syslog_handler = SysLogHandler(address='/dev/log', facility=SysLogHandler.LOG_LOCAL0)
+        syslog_handler.setFormatter(JSONFormatter(config.node.name))
+        logger.addHandler(syslog_handler)
+    except Exception:
+        # Syslog not available (e.g., on Mac dev machine)
+        pass
 
     _logger = logger
     return logger

@@ -17,6 +17,17 @@ from dataclasses import dataclass
 from logger import log_info, log_error, log_warning
 from storage import is_mounted, STORAGE_MOUNT
 
+# Lazy import to avoid circular dependency
+_broadcast_can = None
+
+async def _notify_can_state():
+    """Notify WebSocket clients of CAN state change."""
+    global _broadcast_can
+    if _broadcast_can is None:
+        from websocket import broadcast_can
+        _broadcast_can = broadcast_can
+    await _broadcast_can()
+
 
 @dataclass
 class CANListenerState:
@@ -172,6 +183,7 @@ class CANListener:
         self.state.client_addr = f"{addr[0]}:{addr[1]}"
 
         log_info("can", f"ESP32 connected from {self.state.client_addr}")
+        await _notify_can_state()
 
         try:
             while self._running:
@@ -219,6 +231,7 @@ class CANListener:
             self.state.client_addr = None
             self.state.ntp_synced = False
             log_info("can", "ESP32 disconnected")
+            await _notify_can_state()
 
 
 # Global instance

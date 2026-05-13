@@ -28,6 +28,14 @@
     enabled: true
     state: started
 
+- name: Deploy rsyslog remote forwarding config
+  become: true
+  template:
+    src: rsyslog-remote.conf.j2
+    dest: /etc/rsyslog.d/60-syncdrive-remote.conf
+    mode: '0644'
+  notify: Restart rsyslog
+
 - name: Create data directories
   become: true
   file:

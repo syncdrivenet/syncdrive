@@ -1,0 +1,4 @@
+# Forward camera app logs (local0 facility) to controller
+# Python logger sends JSON to local0, rsyslog forwards to controller fluent-bit
+
+local0.*    @@{{ controller_host }}:5514
