@@ -26,6 +26,7 @@ try:
     from picamera2 import Picamera2
     from picamera2.encoders import H264Encoder
     from picamera2.outputs import PyavOutput, SplittableOutput
+    from libcamera import Transform
     PICAMERA_AVAILABLE = True
 except ImportError:
     PICAMERA_AVAILABLE = False
@@ -151,6 +152,7 @@ class Recorder:
                     "format": "RGB888",
                 },
                 controls={"FrameRate": self.config.recording.fps},
+                transform=Transform(hflip=True, vflip=True),  # 180° rotation
             )
             self.camera.configure(video_config)
             self.encoder = H264Encoder(bitrate=self.config.recording.bitrate)
